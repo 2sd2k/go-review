@@ -26,6 +26,7 @@ export default function WinRateGraph() {
           winRate: Math.round(analysis.win_rate * 1000) / 10, // percentage with 1 decimal
           score: Math.round(analysis.score_lead * 10) / 10,
           quality: analysis.quality,
+          pointLoss: analysis.point_loss,
         });
       }
     }
@@ -71,6 +72,9 @@ export default function WinRateGraph() {
                     <div style={{ color: QUALITY_COLORS[quality] }}>
                       {quality.charAt(0).toUpperCase() + quality.slice(1)}
                     </div>
+                  )}
+                  {typeof d.pointLoss === 'number' && d.move > 0 && (
+                    <div className="text-gray-400">Point loss: {d.pointLoss.toFixed(1)}</div>
                   )}
                 </div>
               );

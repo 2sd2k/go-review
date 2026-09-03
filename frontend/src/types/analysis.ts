@@ -15,7 +15,13 @@ export interface MoveAnalysis {
   score_lead: number; // positive = black leads
   top_moves: SuggestedMove[];
   ownership: number[]; // 361 values, -1 (white) to 1 (black)
-  // Added by frontend after classification
+  // Direct comparison from the preceding position, when available.
+  played_move?: SuggestedMove;
+  best_move?: SuggestedMove;
+  // Supplied by the backend for direct comparisons, with a legacy frontend fallback.
   quality?: MoveQuality;
   win_rate_loss?: number;
+  point_loss?: number;
+  // Added by the frontend's blended classifier.
+  impact_score?: number;
 }

@@ -34,9 +34,11 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       // Classify the move quality
       const prevAnalysis = newResults.get(analysis.move_number - 1);
       if (analysis.move_number > 0) {
-        const { quality, winRateLoss } = classifyMove(prevAnalysis, analysis);
+        const { quality, winRateLoss, pointLoss, impactScore } = classifyMove(prevAnalysis, analysis);
         analysis.quality = quality;
         analysis.win_rate_loss = winRateLoss;
+        analysis.point_loss = pointLoss;
+        analysis.impact_score = impactScore;
       }
 
       newResults.set(analysis.move_number, analysis);

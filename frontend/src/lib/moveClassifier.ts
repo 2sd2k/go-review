@@ -1,15 +1,37 @@
 import type { MoveAnalysis, MoveQuality } from '../types/analysis';
 
+const POINT_LOSS_TO_WIN_RATE_EQUIVALENT = 0.02;
+
+export interface MoveClassification {
+  quality: MoveQuality;
+  winRateLoss: number;
+  pointLoss: number;
+  impactScore: number;
+}
+
+function fromPlayerPerspective(value: number, player: string): number {
+  return player === 'W' ? -value : value;
+}
+
+function classifyImpact(impact: number): MoveQuality {
+  if (impact < 0.01) return 'best';
+  if (impact < 0.03) return 'good';
+  if (impact < 0.06) return 'inaccuracy';
+  if (impact < 0.12) return 'mistake';
+  return 'blunder';
+}
+
 /**
- * Classify a move's quality based on win rate loss compared to the previous position.
- * Win rates are from black's perspective (0-1).
+ * Classify a move using KataGo's direct comparison when available, with a
+ * root-position fallback for older analysis results. Engine values use Black's
+ * perspective; returned losses always use the mover's perspective.
  */
 export function classifyMove(
   prevAnalysis: MoveAnalysis | undefined,
   currentAnalysis: MoveAnalysis
-): { quality: MoveQuality; winRateLoss: number } {
+): MoveClassification {
   if (!prevAnalysis) {
-    return { quality: 'good', winRateLoss: 0 };
+    return { quality: 'good', winRateLoss: 0, pointLoss: 0, impactScore: 0 };
   }
 
   // The move was played by the player whose turn it was at the previous position
@@ -28,27 +50,39 @@ export function classifyMove(
   }
 
   // Best possible win rate = what the top move would have given
-  const bestMoveWinRate = prevAnalysis.top_moves.length > 0
-    ? (playerWhoMoved === 'W' ? 1 - prevAnalysis.top_moves[0].win_rate : prevAnalysis.top_moves[0].win_rate)
+  const bestMove = currentAnalysis.best_move ?? prevAnalysis.top_moves[0];
+  const bestMoveWinRate = bestMove
+    ? (playerWhoMoved === 'W' ? 1 - bestMove.win_rate : bestMove.win_rate)
     : winRateBefore;
 
-  // Loss = how much worse the played move is compared to the best
-  const winRateLoss = Math.max(0, bestMoveWinRate - winRateAfter);
+  // Loss in winning chances compared with KataGo's best candidate.
+  const winRateLoss = currentAnalysis.win_rate_loss
+    ?? Math.max(0, bestMoveWinRate - winRateAfter);
 
-  let quality: MoveQuality;
-  if (winRateLoss < 0.01) {
-    quality = 'best';
-  } else if (winRateLoss < 0.03) {
-    quality = 'good';
-  } else if (winRateLoss < 0.06) {
-    quality = 'inaccuracy';
-  } else if (winRateLoss < 0.12) {
-    quality = 'mistake';
-  } else {
-    quality = 'blunder';
-  }
+  // Score values are always stored from Black's perspective. Flip them for
+  // White so a positive pointLoss consistently means the mover lost points.
+  const bestScoreLead = bestMove?.score_lead ?? prevAnalysis.score_lead;
+  const bestScoreForPlayer = fromPlayerPerspective(bestScoreLead, playerWhoMoved);
+  const actualScoreForPlayer = fromPlayerPerspective(currentAnalysis.score_lead, playerWhoMoved);
+  const pointLoss = currentAnalysis.point_loss
+    ?? Math.max(0, bestScoreForPlayer - actualScoreForPlayer);
 
-  return { quality, winRateLoss };
+  // Win rate stops being informative near 0% and 100%. Convert point loss to
+  // a comparable scale and increase its influence as the position saturates.
+  // Win-rate loss is retained as a floor so point estimates never dilute an
+  // otherwise obvious tactical swing.
+  const saturation = Math.min(1, Math.abs(winRateBefore - 0.5) * 2);
+  const scoreWeight = 0.25 + saturation * 0.5;
+  const pointLossEquivalent = Math.min(1, pointLoss * POINT_LOSS_TO_WIN_RATE_EQUIVALENT);
+  const blendedImpact = winRateLoss * (1 - scoreWeight) + pointLossEquivalent * scoreWeight;
+  const impactScore = Math.max(winRateLoss, blendedImpact);
+
+  return {
+    quality: classifyImpact(impactScore),
+    winRateLoss,
+    pointLoss,
+    impactScore,
+  };
 }
 
 export const QUALITY_COLORS: Record<MoveQuality, string> = {
