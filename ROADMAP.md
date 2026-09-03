@@ -5,15 +5,17 @@ the alternatives easy to explore, and explain them at the player's level.
 
 ## Phase 1 — Trustworthy review MVP
 
-1. Add automated tests for captures, suicide, ko, passes, handicap setup,
+1. [x] Add automated tests for captures, suicide, ko, passes, handicap setup,
    malformed SGF, coordinate conversion, and move classification.
-2. Replace fixed win-rate thresholds with a blended score-loss/win-rate model.
+2. [x] Replace fixed win-rate thresholds with a blended score-loss/win-rate model.
    Score loss matters more in handicap games and when win rate is already near
    0% or 100%.
-3. Analyze the played move directly, not only the post-move root position, and
+3. [x] Analyze the played move directly, not only the post-move root position, and
    store point loss, win-rate loss, best move, visits, and principal variation.
-4. Support SGF variations and preserve comments instead of following only the
-   first branch.
+4. Replace the linear move history with a visible variation tree. Playing from
+   a past position must create a new timeline instead of deleting future moves;
+   users must be able to see, compare, and navigate every branch. Import and
+   export SGF variations and preserve comments on their original nodes.
 5. Finish rule correctness: carry ko state during local editing and either
    implement positional/situational superko or delegate legality to a proven Go
    board library.
@@ -34,6 +36,9 @@ and every label can be traced to KataGo evidence.
 4. Add responsive mobile/tablet layouts and accessible board controls.
 5. Save analysis results locally first (IndexedDB), keyed by SGF hash, KataGo
    model/version, rules, komi, and visit count so repeat reviews are instant.
+6. Redesign the interface with an Online-Go.com-inspired aesthetic: primarily
+   black, white, and restrained neutral grays; remove the current purple tint
+   and decorative gradients while preserving clear move-quality indicators.
 
 Exit criterion: a user can upload a game and understand the three most
 important lessons without reading raw engine numbers.
@@ -97,6 +102,4 @@ without claiming that KataGo itself speaks natural language.
 - Avoid retaining ownership arrays for every move unless the UI needs them.
 - Add CI for frontend lint/build, backend tests, and one mocked engine protocol
   test; keep the real-model smoke test optional because it is hardware-specific.
-- Initialize this folder as its own Git repository. It currently resolves to a
-  Git repository rooted at the user's home directory, which makes status and
-  commits unsafe and noisy.
+- [x] Initialize this folder as its own Git repository and connect it to GitHub.
