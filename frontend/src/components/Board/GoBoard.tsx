@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import type { BoardState, Point, StoneColor } from '../../types/game';
 import type { SuggestedMove } from '../../types/analysis';
-import { displayToPoint } from '../../lib/coordinates';
+import { displayToPoint, GTP_COLUMNS } from '../../lib/coordinates';
 
 interface GoBoardProps {
   boardState: BoardState;
@@ -40,8 +40,6 @@ function getStarPoints(size: number): Point[] {
   if (size === 9) return STAR_POINTS_9;
   return [];
 }
-
-const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';
 
 export default function GoBoard({
   boardState, size = 19, lastMove, nextTurn = 'B',
@@ -115,8 +113,8 @@ export default function GoBoard({
     for (let i = 0; i < size; i++) {
       // Column labels (top and bottom)
       const x = padding + i * cellSize;
-      ctx.fillText(COL_LETTERS[i], x, padding * 0.38);
-      ctx.fillText(COL_LETTERS[i], x, canvasSize - padding * 0.38);
+      ctx.fillText(GTP_COLUMNS[i], x, padding * 0.38);
+      ctx.fillText(GTP_COLUMNS[i], x, canvasSize - padding * 0.38);
 
       // Row labels (left and right)
       const y = padding + i * cellSize;

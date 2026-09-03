@@ -113,6 +113,11 @@ function nextPlayerAt(
  * Precomputes the board state at every move for instant navigation.
  */
 export function parseSgf(sgfText: string): Game {
+  const trimmed = sgfText.trim();
+  if (!trimmed.startsWith('(;') || !trimmed.endsWith(')')) {
+    throw new Error('Invalid SGF: expected a complete game tree');
+  }
+
   const trees = parse(sgfText) as SgfNode[];
   if (!trees || trees.length === 0) {
     throw new Error('Invalid SGF: no game trees found');
@@ -121,6 +126,9 @@ export function parseSgf(sgfText: string): Game {
   const root = trees[0];
   const sizeStr = prop(root, 'SZ');
   const size = sizeStr ? parseInt(sizeStr) : 19;
+  if (!Number.isInteger(size) || size < 2 || size > 25) {
+    throw new Error(`Invalid or unsupported board size: ${sizeStr ?? size}`);
+  }
   const metadata = extractMetadata(root);
   const rawMoves = collectMoves(root, size);
 

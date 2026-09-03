@@ -38,3 +38,15 @@ the backend. Set backend `CORS_ORIGINS` to a comma-separated list of allowed
 frontend origins.
 
 See [ROADMAP.md](./ROADMAP.md) for the recommended build sequence.
+
+## Test
+
+```sh
+cd frontend
+npm test
+npm run lint
+npm run build
+
+cd ../backend
+python3 -m unittest discover -s tests -v
+```
