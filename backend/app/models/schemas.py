@@ -34,6 +34,10 @@ class MoveAnalysis(BaseModel):
     score_lead: float  # positive = black leads
     top_moves: List[SuggestedMove]
     ownership: List[float]  # 361 values for 19x19, -1 (white) to 1 (black)
+    played_move: Optional[SuggestedMove] = None
+    best_move: Optional[SuggestedMove] = None
+    win_rate_loss: Optional[float] = None
+    point_loss: Optional[float] = None
 
 
 class AnalysisProgress(BaseModel):

@@ -47,7 +47,7 @@ async def analyze_game(ws: WebSocket):
                 "type": "result",
                 "move_number": analysis.move_number,
                 "total_moves": total_moves,
-                "analysis": analysis.model_dump(),
+                "analysis": analysis.model_dump(exclude_none=True),
             }))
 
         # Signal completion

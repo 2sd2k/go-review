@@ -188,6 +188,7 @@ class KataGoEngine:
 
         # Send a query for each position (including the empty board)
         futures: list[tuple[int, asyncio.Future]] = []
+        comparisons: dict[int, tuple[SuggestedMove, SuggestedMove, float, float]] = {}
 
         game_id = uuid4().hex
         for turn in range(len(moves) + 1):
@@ -221,10 +222,124 @@ class KataGoEngine:
             try:
                 response = await future
                 analysis = parse_katago_response(response, turn)
+                comparison = comparisons.get(turn)
+                if comparison:
+                    played_move, best_move, win_rate_loss, point_loss = comparison
+                    analysis.played_move = played_move
+                    analysis.best_move = best_move
+                    analysis.win_rate_loss = win_rate_loss
+                    analysis.point_loss = point_loss
                 yield analysis
+
+                if turn < len(moves):
+                    comparison = await self._get_played_move_comparison(
+                        game_id=game_id,
+                        turn=turn,
+                        position_response=response,
+                        moves=moves,
+                        initial_stones=initial_stones or [],
+                        rules=rules,
+                        komi=komi,
+                        board_size=board_size,
+                        max_visits=visits,
+                    )
+                    if comparison:
+                        comparisons[turn + 1] = comparison
             except Exception as e:
                 logger.error(f"Error analyzing turn {turn}: {e}")
                 continue
+
+    async def _get_played_move_comparison(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        position_response: dict,
+        moves: list[list[str]],
+        initial_stones: list[list[str]],
+        rules: str,
+        komi: float,
+        board_size: int,
+        max_visits: int,
+    ) -> tuple[SuggestedMove, SuggestedMove, float, float] | None:
+        """Compare the next played move with KataGo's best move at this position."""
+        player, move = moves[turn]
+        move_infos = position_response.get("moveInfos", [])
+        if not move_infos:
+            return None
+
+        best_info = min(move_infos, key=lambda info: info.get("order", 10_000))
+        best_move = parse_suggested_move(best_info)
+        played_info = next(
+            (info for info in move_infos if same_move(info.get("move"), move)),
+            None,
+        )
+
+        # A barely explored candidate is too noisy for review labels. Force a
+        # focused search while allowing well-explored normal results to be reused.
+        minimum_visits = max(1, max_visits // 4)
+        if played_info is None or played_info.get("visits", 0) < minimum_visits:
+            query = {
+                "id": f"{game_id}_played_t{turn + 1}",
+                "moves": moves[:turn],
+                "initialStones": initial_stones,
+                "rules": rules,
+                "komi": komi,
+                "boardXSize": board_size,
+                "boardYSize": board_size,
+                "maxVisits": max_visits,
+                "allowMoves": [{
+                    "player": player,
+                    "moves": [move],
+                    "untilDepth": 1,
+                }],
+            }
+            focused_response = await self._send_query(query)
+            focused_moves = focused_response.get("moveInfos", [])
+            played_info = next(
+                (info for info in focused_moves if same_move(info.get("move"), move)),
+                focused_moves[0] if focused_moves else None,
+            )
+
+        if played_info is None:
+            logger.warning("KataGo returned no evaluation for played move %s at turn %s", move, turn)
+            return None
+
+        played_move = parse_suggested_move(played_info)
+        win_rate_loss, point_loss = calculate_move_losses(player, best_move, played_move)
+        return played_move, best_move, win_rate_loss, point_loss
+
+
+def same_move(first: str | None, second: str) -> bool:
+    return first is not None and first.casefold() == second.casefold()
+
+
+def parse_suggested_move(move_info: dict) -> SuggestedMove:
+    return SuggestedMove(
+        move=move_info.get("move", "pass"),
+        win_rate=move_info.get("winrate", 0.5),
+        score_lead=move_info.get("scoreLead", 0.0),
+        visits=move_info.get("visits", 0),
+        pv=move_info.get("pv", []),
+    )
+
+
+def calculate_move_losses(
+    player: str,
+    best_move: SuggestedMove,
+    played_move: SuggestedMove,
+) -> tuple[float, float]:
+    """Return non-negative win-rate and point losses from the mover's perspective."""
+    direction = 1 if player == "B" else -1
+    win_rate_loss = max(
+        0.0,
+        direction * (best_move.win_rate - played_move.win_rate),
+    )
+    point_loss = max(
+        0.0,
+        direction * (best_move.score_lead - played_move.score_lead),
+    )
+    return win_rate_loss, point_loss
 
 
 def parse_katago_response(response: dict, move_number: int) -> MoveAnalysis:
@@ -241,15 +356,7 @@ def parse_katago_response(response: dict, move_number: int) -> MoveAnalysis:
     # Parse top candidate moves
     top_moves = []
     for mi in move_infos[:5]:  # top 5 moves
-        pv_raw = mi.get("pv", [])
-
-        top_moves.append(SuggestedMove(
-            move=mi.get("move", "pass"),
-            win_rate=mi.get("winrate", 0.5),
-            score_lead=mi.get("scoreLead", 0.0),
-            visits=mi.get("visits", 0),
-            pv=pv_raw,
-        ))
+        top_moves.append(parse_suggested_move(mi))
 
     return MoveAnalysis(
         move_number=move_number,
