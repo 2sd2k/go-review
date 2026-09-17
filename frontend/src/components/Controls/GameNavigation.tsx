@@ -1,19 +1,23 @@
 import { useGameStore } from '../../stores/gameStore';
+import { currentLine, getMoveIndex } from '../../lib/moveTree';
 
 export default function GameNavigation() {
-  const { game, currentMoveIndex, goToStart, prevMove, nextMove, goToEnd, goToMove } =
+  const { game, currentNodeId, goToStart, prevMove, nextMove, goToEnd, goToMove } =
     useGameStore();
 
-  const totalMoves = game ? game.nodes.length - 1 : 0;
-  const nextPlayer = game?.nodes[currentMoveIndex]?.nextPlayer;
+  const line = game ? currentLine(game, currentNodeId) : [];
+  const totalMoves = Math.max(0, line.length - 1);
+  const currentIndex = game ? getMoveIndex(game, currentNodeId) : 0;
+  const current = game?.nodes[currentNodeId];
+  const nextPlayer = current?.nextPlayer;
 
   return (
     <div className="flex flex-col items-center gap-2 w-full">
-      {/* Move counter */}
       <div className="text-xs text-gray-400">
-        {game ? (
+        {game && current ? (
           <>
-            Move {currentMoveIndex} / {totalMoves}
+            Move {current.moveNumber} / {line[line.length - 1]?.moveNumber ?? 0}
+            {!current.trunk && <span className="ml-1 text-emerald-400">variation</span>}
             {nextPlayer && (
               <span className="ml-2">
                 — {nextPlayer === 'B' ? 'Black' : 'White'} to play
@@ -25,29 +29,27 @@ export default function GameNavigation() {
         )}
       </div>
 
-      {/* Navigation buttons */}
       <div className="flex gap-1">
-        <NavButton onClick={goToStart} disabled={currentMoveIndex === 0} title="Go to start (Home)">
+        <NavButton onClick={goToStart} disabled={currentIndex === 0} title="Go to start (Home)">
           ⏮
         </NavButton>
-        <NavButton onClick={prevMove} disabled={currentMoveIndex === 0} title="Previous move (←)">
+        <NavButton onClick={prevMove} disabled={currentIndex === 0} title="Previous move (←)">
           ◀
         </NavButton>
-        <NavButton onClick={nextMove} disabled={currentMoveIndex >= totalMoves} title="Next move (→)">
+        <NavButton onClick={nextMove} disabled={currentIndex >= totalMoves} title="Next move (→)">
           ▶
         </NavButton>
-        <NavButton onClick={goToEnd} disabled={currentMoveIndex >= totalMoves} title="Go to end (End)">
+        <NavButton onClick={goToEnd} disabled={currentIndex >= totalMoves} title="Go to end of this line (End)">
           ⏭
         </NavButton>
       </div>
 
-      {/* Move slider */}
       {totalMoves > 0 && (
         <input
           type="range"
           min={0}
           max={totalMoves}
-          value={currentMoveIndex}
+          value={currentIndex}
           onChange={(e) => goToMove(parseInt(e.target.value))}
           className="w-full accent-amber-500"
         />

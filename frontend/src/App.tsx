@@ -2,7 +2,8 @@ import { useState } from 'react';
 import GoBoard from './components/Board/GoBoard';
 import GameNavigation from './components/Controls/GameNavigation';
 import UploadPanel from './components/Controls/UploadPanel';
-import MoveList from './components/Analysis/MoveList';
+import MarkupToolbar from './components/Controls/MarkupToolbar';
+import MoveTreeView from './components/Analysis/MoveTreeView';
 import WinRateGraph from './components/Analysis/WinRateGraph';
 import ScoreBar from './components/Analysis/ScoreBar';
 import MoveCommentary from './components/Analysis/MoveCommentary';
@@ -11,36 +12,39 @@ import { useAnalysisStore } from './stores/analysisStore';
 import { useAnalysis } from './hooks/useAnalysis';
 import { useKeyboardNav } from './hooks/useKeyboardNav';
 import type { Point, StoneColor } from './types/game';
+import { trunkLine } from './lib/moveTree';
 
 function App() {
   useKeyboardNav();
 
-  const { game, currentMoveIndex, playMove } = useGameStore();
-  const { results, isAnalyzing, progress, totalMoves, error, clear: clearAnalysis } = useAnalysisStore();
+  const { game, currentNodeId, playMove, editTool, toggleBoardMark } = useGameStore();
+  const { results, isAnalyzing, progress, totalMoves, error } = useAnalysisStore();
   const { analyzeGame, stopAnalysis } = useAnalysis();
-  const nextTurn: StoneColor = game?.nodes[currentMoveIndex]?.nextPlayer ?? 'B';
+  const currentNode = game?.nodes[currentNodeId] ?? null;
+  const nextTurn: StoneColor = currentNode?.nextPlayer ?? 'B';
 
   const [showOwnership, setShowOwnership] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
 
-  const currentNode = game?.nodes[currentMoveIndex] ?? null;
   const boardState = currentNode?.boardState ?? Array.from({ length: 19 }, () => Array(19).fill(null));
 
-  const currentAnalysis = results.get(currentMoveIndex);
-  const prevAnalysis = currentMoveIndex > 0 ? results.get(currentMoveIndex - 1) : undefined;
+  const currentAnalysis = currentNode?.trunk ? results.get(currentNode.moveNumber) : undefined;
+  const prevAnalysis = currentNode?.trunk && currentNode.moveNumber > 0
+    ? results.get(currentNode.moveNumber - 1)
+    : undefined;
 
-  // Find the last move's point for the marker
   let lastMove: Point | null = null;
   if (currentNode?.move && currentNode.move.point !== 'pass') {
     lastMove = currentNode.move.point;
   }
 
   const handleIntersectionClick = (point: Point) => {
-    clearAnalysis();
-    playMove(point);
+    if (editTool === 'play') playMove(point);
+    else toggleBoardMark(point);
   };
 
   const hasAnalysis = results.size > 0;
+  const trunkMoves = game ? Math.max(0, trunkLine(game).length - 1) : 0;
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -64,14 +68,18 @@ function App() {
             suggestedMoves={prevAnalysis?.top_moves}
             showOwnership={showOwnership}
             showSuggestions={showSuggestions}
+            marks={currentNode?.marks ?? []}
+            editTool={editTool}
             onIntersectionClick={handleIntersectionClick}
           />
         </div>
 
         {/* Right panel */}
-        <div className="flex-shrink-0 flex flex-col gap-2 w-[220px] min-h-0 overflow-y-auto">
+        <div className="flex-shrink-0 flex flex-col gap-2 w-[280px] min-h-0 overflow-y-auto">
           {/* Upload */}
           <UploadPanel />
+
+          <MarkupToolbar />
 
           {/* Analyze button */}
           {game && (
@@ -144,7 +152,7 @@ function App() {
             {game ? (
               <div className="space-y-1 text-xs text-gray-400">
                 <p>Board size: {game.size}x{game.size}</p>
-                <p>Total moves: {game.nodes.length - 1}</p>
+                <p>Main line: {trunkMoves} moves</p>
                 {game.metadata.blackPlayer && (
                   <p>Black: {game.metadata.blackPlayer} {game.metadata.blackRank ?? ''}</p>
                 )}
@@ -155,6 +163,12 @@ function App() {
                 {currentNode && (
                   <div className="mt-2 pt-2 border-t border-gray-700">
                     <p>Captures — B: {currentNode.captures.black} W: {currentNode.captures.white}</p>
+                  </div>
+                )}
+                {currentNode?.comment && (
+                  <div className="mt-2 pt-2 border-t border-gray-700">
+                    <p className="text-gray-500 mb-0.5">Comment</p>
+                    <p className="text-gray-200 whitespace-pre-wrap">{currentNode.comment}</p>
                   </div>
                 )}
               </div>
@@ -170,10 +184,12 @@ function App() {
             <GameNavigation />
           </div>
 
-          {/* Move list */}
-          <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700 min-h-0 flex-1 overflow-hidden">
-            <h2 className="text-sm font-semibold text-gray-200 mb-2">Moves</h2>
-            <MoveList />
+          {/* Variation tree */}
+          <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700 min-h-0 flex-1 flex flex-col overflow-hidden">
+            <h2 className="text-sm font-semibold text-gray-200 mb-2">Variation tree</h2>
+            <div className="min-h-0 flex-1">
+              <MoveTreeView />
+            </div>
           </div>
         </div>
       </div>

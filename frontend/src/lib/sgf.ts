@@ -1,8 +1,10 @@
-import { parse } from '@sabaki/sgf';
+import { parse, stringify } from '@sabaki/sgf';
 import type { Game, GameNode, GameMetadata, BoardState, Move, StoneColor, Point } from '../types/game';
 import { createEmptyBoard } from '../types/game';
-import { applyMove } from './goLogic';
-import { sgfToPoint } from './coordinates';
+import { applyMove, cloneBoard, opponent } from './goLogic';
+import { pointToSgf, sgfToPoint } from './coordinates';
+import { attachChild, getNode } from './moveTree';
+import { marksToSgfProps, parseSgfMarks } from './marks';
 
 interface SgfNode {
   id: number;
@@ -28,40 +30,6 @@ function extractMetadata(root: SgfNode): GameMetadata {
     event: prop(root, 'EV'),
     rules: prop(root, 'RU')?.toLowerCase(),
   };
-}
-
-/** Walk the main variation (first child at each branch) and collect moves */
-function collectMoves(root: SgfNode, boardSize: number): { move: Move | null; comment?: string }[] {
-  const moves: { move: Move | null; comment?: string }[] = [];
-  let current: SgfNode | null = root;
-
-  while (current) {
-    const black = prop(current, 'B');
-    const white = prop(current, 'W');
-    const comment = prop(current, 'C');
-
-    if (black !== undefined) {
-      const move: Move = {
-        color: 'B',
-        point: black === '' || (black === 'tt' && boardSize <= 19) ? 'pass' : sgfToPoint(black),
-      };
-      moves.push({ move, comment });
-    } else if (white !== undefined) {
-      const move: Move = {
-        color: 'W',
-        point: white === '' || (white === 'tt' && boardSize <= 19) ? 'pass' : sgfToPoint(white),
-      };
-      moves.push({ move, comment });
-    } else if (moves.length === 0) {
-      // Root node — no move
-      moves.push({ move: null, comment });
-    }
-
-    // Follow main variation (first child)
-    current = current.children.length > 0 ? current.children[0] : null;
-  }
-
-  return moves;
 }
 
 function setupPoints(value: string): Point[] {
@@ -92,29 +60,134 @@ function applyRootSetup(board: BoardState, root: SgfNode): Move[] {
   return stones;
 }
 
-function nextPlayerAt(
-  rawMoves: { move: Move | null }[],
-  index: number,
-  currentMove: Move | null,
+function parseMove(sgfNode: SgfNode, boardSize: number): Move | null {
+  const black = prop(sgfNode, 'B');
+  const white = prop(sgfNode, 'W');
+  if (black !== undefined) {
+    return {
+      color: 'B',
+      point: black === '' || (black === 'tt' && boardSize <= 19) ? 'pass' : sgfToPoint(black),
+    };
+  }
+  if (white !== undefined) {
+    return {
+      color: 'W',
+      point: white === '' || (white === 'tt' && boardSize <= 19) ? 'pass' : sgfToPoint(white),
+    };
+  }
+  return null;
+}
+
+function nextPlayerFor(
+  sgfNode: SgfNode,
+  move: Move | null,
   root: SgfNode,
+  boardSize: number,
 ): StoneColor {
-  for (let i = index + 1; i < rawMoves.length; i++) {
-    const futureMove = rawMoves[i].move;
-    if (futureMove) return futureMove.color;
+  for (const child of sgfNode.children) {
+    const childMove = parseMove(child, boardSize);
+    if (childMove) return childMove.color;
   }
   const explicit = prop(root, 'PL');
-  if (!currentMove && (explicit === 'B' || explicit === 'W')) return explicit;
-  if (currentMove) return currentMove.color === 'B' ? 'W' : 'B';
+  if (!move && (explicit === 'B' || explicit === 'W')) return explicit;
+  if (move) return opponent(move.color);
   return (root.data.AB?.length ?? 0) > 1 ? 'W' : 'B';
 }
 
+function applyPlayedMove(
+  parent: GameNode,
+  move: Move,
+): { boardState: BoardState; captures: GameNode['captures']; commentSuffix?: string } {
+  if (move.point === 'pass') {
+    return { boardState: parent.boardState, captures: parent.captures };
+  }
+
+  try {
+    const result = applyMove(parent.boardState, move.point as Point, move.color);
+    return {
+      boardState: result.board,
+      captures: {
+        black: parent.captures.black + (move.color === 'B' ? result.captured.length : 0),
+        white: parent.captures.white + (move.color === 'W' ? result.captured.length : 0),
+      },
+    };
+  } catch (err) {
+    console.warn(`Skipping illegal move ${parent.moveNumber + 1}:`, err);
+    return {
+      boardState: parent.boardState,
+      captures: parent.captures,
+      commentSuffix: '[illegal move skipped]',
+    };
+  }
+}
+
+function ingestChildren(
+  game: Game,
+  parentId: number,
+  sgfNode: SgfNode,
+  root: SgfNode,
+  boardSize: number,
+  parentIsTrunk: boolean,
+): Game {
+  let nextGame = game;
+  sgfNode.children.forEach((child, index) => {
+    const asTrunk = parentIsTrunk && index === 0;
+    nextGame = ingestNode(nextGame, parentId, child, root, boardSize, asTrunk);
+  });
+  return nextGame;
+}
+
+function ingestNode(
+  game: Game,
+  parentId: number,
+  sgfNode: SgfNode,
+  root: SgfNode,
+  boardSize: number,
+  asTrunk: boolean,
+): Game {
+  const parent = getNode(game, parentId);
+  const move = parseMove(sgfNode, boardSize);
+  const rawComment = prop(sgfNode, 'C');
+  let comment = rawComment;
+  let boardState = parent.boardState;
+  let captures = parent.captures;
+  let moveNumber = parent.moveNumber;
+
+  if (move) {
+    const played = applyPlayedMove(parent, move);
+    boardState = played.boardState;
+    captures = played.captures;
+    moveNumber = parent.moveNumber + 1;
+    if (played.commentSuffix) {
+      comment = comment ? `${comment} ${played.commentSuffix}` : played.commentSuffix;
+    }
+  }
+
+  const { game: withChild, node } = attachChild(game, parentId, {
+    trunkNextId: null,
+    branchIds: [],
+    hintNextId: null,
+    trunk: asTrunk,
+    move,
+    boardState,
+    moveNumber,
+    comment,
+    captures,
+    nextPlayer: nextPlayerFor(sgfNode, move, root, boardSize),
+    marks: parseSgfMarks(sgfNode.data),
+  });
+
+  return ingestChildren(withChild, node.id, sgfNode, root, boardSize, asTrunk);
+}
+
 /**
- * Parse an SGF string into our Game type.
- * Precomputes the board state at every move for instant navigation.
+ * Parse an SGF string into a Game tree.
+ * The first child at each trunk node is the official line; remaining children
+ * become branches. Comments stay on the node that owned the `C` property.
  */
 export function parseSgf(sgfText: string): Game {
   const trimmed = sgfText.trim();
-  if (!trimmed.startsWith('(;') || !trimmed.endsWith(')')) {
+  if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) {
     throw new Error('Invalid SGF: expected a complete game tree');
   }
 
@@ -129,86 +202,94 @@ export function parseSgf(sgfText: string): Game {
   if (!Number.isInteger(size) || size < 2 || size > 25) {
     throw new Error(`Invalid or unsupported board size: ${sizeStr ?? size}`);
   }
-  const metadata = extractMetadata(root);
-  const rawMoves = collectMoves(root, size);
 
-  // Build game nodes with precomputed board states
-  const nodes: GameNode[] = [];
-  let currentBoard: BoardState = createEmptyBoard(size);
-  const initialStones = applyRootSetup(currentBoard, root);
-  let totalCapturesBlack = 0;
-  let totalCapturesWhite = 0;
+  const board = createEmptyBoard(size);
+  const initialStones = applyRootSetup(board, root);
+  const rootComment = prop(root, 'C');
+  const rootNode: GameNode = {
+    id: 0,
+    parentId: null,
+    trunkNextId: null,
+    branchIds: [],
+    hintNextId: null,
+    trunk: true,
+    move: null,
+    boardState: cloneBoard(board),
+    moveNumber: 0,
+    comment: rootComment,
+    captures: { black: 0, white: 0 },
+    nextPlayer: nextPlayerFor(root, null, root, size),
+    marks: parseSgfMarks(root.data),
+  };
 
-  for (let i = 0; i < rawMoves.length; i++) {
-    const { move, comment } = rawMoves[i];
+  const game: Game = {
+    size,
+    rootId: 0,
+    nodes: { 0: rootNode },
+    nextId: 1,
+    metadata: extractMetadata(root),
+    initialStones,
+  };
 
-    if (!move) {
-      // Root node
-      nodes.push({
-        move: null,
-        boardState: currentBoard,
-        moveNumber: 0,
-        comment,
-        captures: { black: 0, white: 0 },
-        nextPlayer: nextPlayerAt(rawMoves, i, move, root),
-      });
-      continue;
-    }
+  return ingestChildren(game, 0, root, root, size, true);
+}
 
-    if (move.point === 'pass') {
-      nodes.push({
-        move,
-        boardState: currentBoard,
-        moveNumber: i,
-        comment,
-        captures: { black: totalCapturesBlack, white: totalCapturesWhite },
-        nextPlayer: nextPlayerAt(rawMoves, i, move, root),
-      });
-      continue;
-    }
+function metadataProps(game: Game): Record<string, string[]> {
+  const data: Record<string, string[]> = {
+    FF: ['4'],
+    GM: ['1'],
+    SZ: [String(game.size)],
+    CA: ['UTF-8'],
+  };
+  const meta = game.metadata;
+  if (meta.blackPlayer) data.PB = [meta.blackPlayer];
+  if (meta.whitePlayer) data.PW = [meta.whitePlayer];
+  if (meta.blackRank) data.BR = [meta.blackRank];
+  if (meta.whiteRank) data.WR = [meta.whiteRank];
+  if (meta.result) data.RE = [meta.result];
+  if (meta.komi != null && !Number.isNaN(meta.komi)) data.KM = [String(meta.komi)];
+  if (meta.date) data.DT = [meta.date];
+  if (meta.event) data.EV = [meta.event];
+  if (meta.rules) data.RU = [meta.rules];
+  return data;
+}
 
-    try {
-      const result = applyMove(currentBoard, move.point as Point, move.color as StoneColor);
-      currentBoard = result.board;
+function setupProps(game: Game): Record<string, string[]> {
+  const black = game.initialStones
+    .filter((stone) => stone.color === 'B' && stone.point !== 'pass')
+    .map((stone) => pointToSgf(stone.point as Point));
+  const white = game.initialStones
+    .filter((stone) => stone.color === 'W' && stone.point !== 'pass')
+    .map((stone) => pointToSgf(stone.point as Point));
+  const data: Record<string, string[]> = {};
+  if (black.length) data.AB = black;
+  if (white.length) data.AW = white;
+  return data;
+}
 
-      if (move.color === 'B') {
-        totalCapturesBlack += result.captured.length;
-      } else {
-        totalCapturesWhite += result.captured.length;
-      }
+function toSgfNode(game: Game, nodeId: number, isRoot: boolean): SgfNode {
+  const node = getNode(game, nodeId);
+  const data: Record<string, string[]> = {};
 
-      nodes.push({
-        move,
-        boardState: currentBoard,
-        moveNumber: i,
-        comment,
-        captures: { black: totalCapturesBlack, white: totalCapturesWhite },
-        nextPlayer: nextPlayerAt(rawMoves, i, move, root),
-      });
-    } catch (err) {
-      // If a move is illegal (rare in real games), skip it but keep going
-      console.warn(`Skipping illegal move ${i}:`, err);
-      nodes.push({
-        move,
-        boardState: currentBoard,
-        moveNumber: i,
-        comment: comment ? `${comment} [illegal move skipped]` : '[illegal move skipped]',
-        captures: { black: totalCapturesBlack, white: totalCapturesWhite },
-        nextPlayer: nextPlayerAt(rawMoves, i, move, root),
-      });
-    }
+  if (isRoot) {
+    Object.assign(data, metadataProps(game), setupProps(game));
+    if (node.nextPlayer === 'W') data.PL = ['W'];
+  } else if (node.move) {
+    const value = node.move.point === 'pass' ? '' : pointToSgf(node.move.point);
+    data[node.move.color] = [value];
   }
 
-  // Ensure we have at least a root node
-  if (nodes.length === 0) {
-    nodes.push({
-      move: null,
-      boardState: createEmptyBoard(size),
-      moveNumber: 0,
-      captures: { black: 0, white: 0 },
-      nextPlayer: prop(root, 'PL') === 'W' ? 'W' : 'B',
-    });
-  }
+  if (node.comment) data.C = [node.comment];
+  Object.assign(data, marksToSgfProps(node.marks));
 
-  return { size, nodes, metadata, initialStones };
+  const children: SgfNode[] = [];
+  if (node.trunkNextId != null) children.push(toSgfNode(game, node.trunkNextId, false));
+  for (const branchId of node.branchIds) children.push(toSgfNode(game, branchId, false));
+
+  return { id: node.id, data, children };
+}
+
+/** Serialize the full variation tree, trunk first, preserving per-node comments. */
+export function exportSgf(game: Game): string {
+  return stringify([toSgfNode(game, game.rootId, true)]);
 }

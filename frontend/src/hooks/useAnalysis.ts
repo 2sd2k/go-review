@@ -32,11 +32,12 @@ export function useAnalysis() {
     setAnalyzing(true);
     setError(null);
 
-    // Convert game moves to the format the backend expects: [["B", "D4"], ["W", "Q16"], ...]
+    // Convert the official (trunk) line to the format the backend expects.
     const moves: string[][] = [];
-    for (let i = 1; i < game.nodes.length; i++) {
-      const node = game.nodes[i];
-      if (!node.move) continue;
+    let node = game.nodes[game.rootId];
+    while (node.trunkNextId != null) {
+      node = game.nodes[node.trunkNextId];
+      if (!node?.move) continue;
 
       const color = node.move.color;
       const point = node.move.point === 'pass'

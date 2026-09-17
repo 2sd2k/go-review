@@ -6,4 +6,5 @@ declare module '@sabaki/sgf' {
   }
 
   export function parse(content: string): SgfNode[];
+  export function stringify(nodes: SgfNode[], options?: { linebreak?: string; indent?: string }): string;
 }

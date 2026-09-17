@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
 import { useGameStore } from '../../stores/gameStore';
-import { parseSgf } from '../../lib/sgf';
+import { exportSgf, parseSgf } from '../../lib/sgf';
 import { useAnalysisStore } from '../../stores/analysisStore';
 
 export default function UploadPanel() {
-  const { loadGame } = useGameStore();
+  const { game, loadGame } = useGameStore();
   const clearAnalysis = useAnalysisStore((state) => state.clear);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -17,9 +17,9 @@ export default function UploadPanel() {
       reader.onload = (e) => {
         try {
           const text = e.target?.result as string;
-          const game = parseSgf(text);
+          const parsed = parseSgf(text);
           clearAnalysis();
-          loadGame(game);
+          loadGame(parsed);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse SGF file');
         }
@@ -84,6 +84,23 @@ export default function UploadPanel() {
       </div>
       {error && (
         <p className="text-xs text-red-400 mt-1">{error}</p>
+      )}
+      {game && (
+        <button
+          type="button"
+          onClick={() => {
+            const blob = new Blob([exportSgf(game)], { type: 'application/x-go-sgf' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'game.sgf';
+            link.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="mt-1 w-full px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+        >
+          Download SGF
+        </button>
       )}
     </div>
   );

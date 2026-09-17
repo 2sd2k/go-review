@@ -7,10 +7,15 @@ import { useAnalysisStore } from '../../stores/analysisStore';
 import { useGameStore } from '../../stores/gameStore';
 import { QUALITY_COLORS } from '../../lib/moveClassifier';
 import type { MoveQuality } from '../../types/analysis';
+import { getBranchPoint } from '../../lib/moveTree';
 
 export default function WinRateGraph() {
   const { results } = useAnalysisStore();
-  const { currentMoveIndex, goToMove } = useGameStore();
+  const { currentNodeId, game, goToTrunkMove } = useGameStore();
+  const current = game?.nodes[currentNodeId];
+  const markerMove = game && current
+    ? (current.trunk ? current.moveNumber : getBranchPoint(game, current.id).moveNumber)
+    : 0;
 
   const data = useMemo(() => {
     if (results.size === 0) return [];
@@ -36,7 +41,7 @@ export default function WinRateGraph() {
   if (data.length === 0) return null;
 
   const handleClick = (data: MouseHandlerDataParam) => {
-    if (typeof data.activeLabel === 'number') goToMove(data.activeLabel);
+    if (typeof data.activeLabel === 'number') goToTrunkMove(data.activeLabel);
   };
 
   return (
@@ -82,7 +87,7 @@ export default function WinRateGraph() {
           />
           <ReferenceLine y={50} stroke="#4b5563" strokeDasharray="3 3" />
           {/* Current move indicator */}
-          <ReferenceLine x={currentMoveIndex} stroke="#f59e0b" strokeWidth={2} />
+          <ReferenceLine x={markerMove} stroke="#f59e0b" strokeWidth={2} />
           <Line
             type="monotone"
             dataKey="winRate"

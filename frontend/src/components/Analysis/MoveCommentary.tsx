@@ -5,13 +5,13 @@ import type { MoveQuality } from '../../types/analysis';
 
 export default function MoveCommentary() {
   const { results } = useAnalysisStore();
-  const { game, currentMoveIndex } = useGameStore();
+  const { game, currentNodeId } = useGameStore();
+  const node = game?.nodes[currentNodeId];
 
-  const analysis = results.get(currentMoveIndex);
-  if (!analysis || currentMoveIndex === 0 || !game) return null;
+  const analysis = node?.trunk ? results.get(node.moveNumber) : undefined;
+  if (!analysis || !node || node.moveNumber === 0 || !game) return null;
 
-  const node = game.nodes[currentMoveIndex];
-  if (!node?.move || node.move.point === 'pass') return null;
+  if (!node.move || node.move.point === 'pass') return null;
 
   const quality = analysis.quality;
   const loss = analysis.win_rate_loss;
@@ -31,7 +31,7 @@ export default function MoveCommentary() {
     );
   }
 
-  const bestMove = analysis.best_move ?? results.get(currentMoveIndex - 1)?.top_moves[0];
+  const bestMove = analysis.best_move ?? (node.moveNumber > 0 ? results.get(node.moveNumber - 1)?.top_moves[0] : undefined);
   const playedMove = analysis.played_move;
   const lossPercent = (loss * 100).toFixed(1);
 

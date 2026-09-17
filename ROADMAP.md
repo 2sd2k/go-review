@@ -12,7 +12,7 @@ the alternatives easy to explore, and explain them at the player's level.
    0% or 100%.
 3. [x] Analyze the played move directly, not only the post-move root position, and
    store point loss, win-rate loss, best move, visits, and principal variation.
-4. Replace the linear move history with a visible variation tree. Playing from
+4. [x] Replace the linear move history with a visible variation tree. Playing from
    a past position must create a new timeline instead of deleting future moves;
    users must be able to see, compare, and navigate every branch. Import and
    export SGF variations and preserve comments on their original nodes.

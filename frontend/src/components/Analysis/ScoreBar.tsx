@@ -3,9 +3,11 @@ import { useGameStore } from '../../stores/gameStore';
 
 export default function ScoreBar() {
   const { results } = useAnalysisStore();
-  const { currentMoveIndex } = useGameStore();
+  const { game, currentNodeId } = useGameStore();
+  const current = game?.nodes[currentNodeId];
+  if (!current?.trunk) return null;
 
-  const analysis = results.get(currentMoveIndex);
+  const analysis = results.get(current.moveNumber);
   if (!analysis) return null;
 
   const blackPct = Math.max(5, Math.min(95, analysis.win_rate * 100));

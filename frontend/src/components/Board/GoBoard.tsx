@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
-import type { BoardState, Point, StoneColor } from '../../types/game';
+import type { BoardMark, BoardState, EditTool, Point, StoneColor } from '../../types/game';
 import type { SuggestedMove } from '../../types/analysis';
 import { displayToPoint, GTP_COLUMNS } from '../../lib/coordinates';
 
@@ -12,6 +12,8 @@ interface GoBoardProps {
   suggestedMoves?: SuggestedMove[] | null;
   showOwnership?: boolean;
   showSuggestions?: boolean;
+  marks?: BoardMark[];
+  editTool?: EditTool;
   onIntersectionClick?: (point: Point) => void;
 }
 
@@ -44,6 +46,7 @@ function getStarPoints(size: number): Point[] {
 export default function GoBoard({
   boardState, size = 19, lastMove, nextTurn = 'B',
   ownership, suggestedMoves, showOwnership = false, showSuggestions = false,
+  marks = [], editTool = 'play',
   onIntersectionClick,
 }: GoBoardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -198,18 +201,30 @@ export default function GoBoard({
       ctx.globalAlpha = 1.0;
     }
 
-    // Draw hover ghost stone
+    for (const mark of marks) {
+      const [row, col] = mark.point;
+      if (row < 0 || row >= size || col < 0 || col >= size) continue;
+      const x = padding + col * cellSize;
+      const y = padding + row * cellSize;
+      drawMark(ctx, x, y, stoneRadius, mark.kind, boardState[row]?.[col] ?? null);
+    }
+
+    // Draw hover ghost stone or mark
     if (hoverPoint) {
       const [hRow, hCol] = hoverPoint;
-      if (boardState[hRow]?.[hCol] === null) {
-        const hx = padding + hCol * cellSize;
-        const hy = padding + hRow * cellSize;
+      const hx = padding + hCol * cellSize;
+      const hy = padding + hRow * cellSize;
+      if (editTool !== 'play') {
+        ctx.globalAlpha = 0.55;
+        drawMark(ctx, hx, hy, stoneRadius, editTool, boardState[hRow]?.[hCol] ?? null);
+        ctx.globalAlpha = 1.0;
+      } else if (boardState[hRow]?.[hCol] === null) {
         ctx.globalAlpha = 0.4;
         drawStone(ctx, hx, hy, stoneRadius, nextTurn);
         ctx.globalAlpha = 1.0;
       }
     }
-  }, [boardState, size, lastMove, hoverPoint, nextTurn, ownership, showOwnership, suggestedMoves, showSuggestions]);
+  }, [boardState, size, lastMove, hoverPoint, nextTurn, ownership, showOwnership, suggestedMoves, showSuggestions, marks, editTool]);
 
   useEffect(() => {
     drawBoard();
@@ -321,4 +336,44 @@ function drawStone(
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function markStroke(stone: StoneColor | null): string {
+  if (stone === 'B') return '#ffffff';
+  if (stone === 'W') return '#111111';
+  return '#1c1917';
+}
+
+function drawMark(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  stoneRadius: number,
+  kind: EditTool,
+  stone: StoneColor | null,
+) {
+  if (kind === 'play') return;
+  const r = stoneRadius * 0.62;
+  ctx.save();
+  ctx.strokeStyle = markStroke(stone);
+  ctx.lineWidth = Math.max(2, stoneRadius * 0.16);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  if (kind === 'circle') {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (kind === 'square') {
+    const s = r * 1.55;
+    ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r * 0.92, y + r * 0.72);
+    ctx.lineTo(x - r * 0.92, y + r * 0.72);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
 }

@@ -1,24 +1,37 @@
 import { create } from 'zustand';
-import type { Game, GameNode, StoneColor, Point, BoardState } from '../types/game';
-import { createEmptyBoard } from '../types/game';
+import type { Game, GameNode, StoneColor, Point, BoardState, EditTool, BoardMarkKind } from '../types/game';
+import { createEmptyBoard, createEmptyGame } from '../types/game';
 import { applyMove } from '../lib/goLogic';
+import { toggleMark } from '../lib/marks';
+import {
+  currentLine,
+  getNode,
+  leafOnCurrentLine,
+  shiftBranchTarget,
+  nextNode,
+  playFrom,
+  prevNode,
+  trunkLine,
+} from '../lib/moveTree';
 
 interface GameState {
   game: Game | null;
-  currentMoveIndex: number;
+  currentNodeId: number;
+  editTool: EditTool;
 
-  // Actions
   loadGame: (game: Game) => void;
+  goToNode: (id: number) => void;
   goToMove: (index: number) => void;
+  goToTrunkMove: (moveNumber: number) => void;
   nextMove: () => void;
   prevMove: () => void;
   goToStart: () => void;
   goToEnd: () => void;
-
-  // Play a move on the board (for manual stone placement)
+  shiftBranch: (delta: number) => void;
   playMove: (point: Point) => void;
+  setEditTool: (tool: EditTool) => void;
+  toggleBoardMark: (point: Point) => void;
 
-  // Computed
   currentNode: () => GameNode | null;
   currentBoard: () => BoardState;
   currentTurn: () => StoneColor;
@@ -26,123 +39,125 @@ interface GameState {
 
 export const useGameStore = create<GameState>((set, get) => ({
   game: null,
-  currentMoveIndex: 0,
+  currentNodeId: 0,
+  editTool: 'play',
 
-  loadGame: (game) => set({ game, currentMoveIndex: 0 }),
+  loadGame: (game) => set({ game, currentNodeId: game.rootId, editTool: 'play' }),
+
+  goToNode: (id) => {
+    const { game } = get();
+    if (!game || !game.nodes[id]) return;
+    set({ currentNodeId: id });
+  },
 
   goToMove: (index) => {
+    const { game, currentNodeId } = get();
+    if (!game) return;
+    const line = currentLine(game, currentNodeId);
+    const clamped = Math.max(0, Math.min(index, line.length - 1));
+    set({ currentNodeId: line[clamped].id });
+  },
+
+  goToTrunkMove: (moveNumber) => {
     const { game } = get();
     if (!game) return;
-    const clamped = Math.max(0, Math.min(index, game.nodes.length - 1));
-    set({ currentMoveIndex: clamped });
+    const node = trunkLine(game).find((candidate) => candidate.moveNumber === moveNumber);
+    if (node) set({ currentNodeId: node.id });
   },
 
   nextMove: () => {
-    const { game, currentMoveIndex } = get();
+    const { game, currentNodeId } = get();
     if (!game) return;
-    if (currentMoveIndex < game.nodes.length - 1) {
-      set({ currentMoveIndex: currentMoveIndex + 1 });
-    }
+    const next = nextNode(game, getNode(game, currentNodeId));
+    if (next) set({ currentNodeId: next.id });
   },
 
   prevMove: () => {
-    const { currentMoveIndex } = get();
-    if (currentMoveIndex > 0) {
-      set({ currentMoveIndex: currentMoveIndex - 1 });
-    }
+    const { game, currentNodeId } = get();
+    if (!game) return;
+    const stepped = prevNode(game, getNode(game, currentNodeId));
+    if (stepped) set({ game: stepped.game, currentNodeId: stepped.node.id });
   },
 
-  goToStart: () => set({ currentMoveIndex: 0 }),
-
-  goToEnd: () => {
+  goToStart: () => {
     const { game } = get();
     if (!game) return;
-    set({ currentMoveIndex: game.nodes.length - 1 });
+    set({ currentNodeId: game.rootId });
+  },
+
+  goToEnd: () => {
+    const { game, currentNodeId } = get();
+    if (!game) return;
+    set({ currentNodeId: leafOnCurrentLine(game, currentNodeId).id });
+  },
+
+  shiftBranch: (delta) => {
+    const { game, currentNodeId } = get();
+    if (!game || delta === 0) return;
+    const neighbor = shiftBranchTarget(game, currentNodeId, delta);
+    if (neighbor) set({ currentNodeId: neighbor.id });
   },
 
   playMove: (point) => {
-    const { game, currentMoveIndex } = get();
-    if (!game) {
-      // No game loaded — start a new one
-      const size = 19;
-      const emptyBoard = createEmptyBoard(size);
-      const rootNode: GameNode = {
-        move: null,
-        boardState: emptyBoard,
-        moveNumber: 0,
-        captures: { black: 0, white: 0 },
-        nextPlayer: 'B',
-      };
-
-      const color: StoneColor = 'B';
-      try {
-        const result = applyMove(emptyBoard, point, color);
-        const newNode: GameNode = {
-          move: { color, point },
-          boardState: result.board,
-          moveNumber: 1,
-          captures: { black: result.captured.length, white: 0 },
-          nextPlayer: 'W',
-        };
-
-        const newGame: Game = {
-          size,
-          nodes: [rootNode, newNode],
-          metadata: {},
-          initialStones: [],
-        };
-        set({ game: newGame, currentMoveIndex: 1 });
-      } catch {
-        // Illegal move — ignore
-      }
-      return;
-    }
-
-    // Game exists — add a move after current position
-    const currentNode = game.nodes[currentMoveIndex];
-    const currentBoard = currentNode.boardState;
-    const moveNumber = currentMoveIndex + 1;
-    const color = currentNode.nextPlayer;
+    const { game, currentNodeId } = get();
+    const active = game ?? createEmptyGame(19);
+    const current = getNode(active, game ? currentNodeId : active.rootId);
+    const color = current.nextPlayer;
 
     try {
-      const result = applyMove(currentBoard, point, color);
-      const prevCaptures = currentNode.captures;
-      const newCaptures = {
-        black: prevCaptures.black + (color === 'B' ? result.captured.length : 0),
-        white: prevCaptures.white + (color === 'W' ? result.captured.length : 0),
-      };
-
-      const newNode: GameNode = {
+      const result = applyMove(current.boardState, point, color);
+      const played = playFrom(active, current.id, {
         move: { color, point },
         boardState: result.board,
-        moveNumber,
-        captures: newCaptures,
+        captures: {
+          black: current.captures.black + (color === 'B' ? result.captured.length : 0),
+          white: current.captures.white + (color === 'W' ? result.captured.length : 0),
+        },
         nextPlayer: color === 'B' ? 'W' : 'B',
-      };
-
-      // Truncate any future moves and append
-      const newNodes = [...game.nodes.slice(0, currentMoveIndex + 1), newNode];
-      const newGame: Game = { ...game, nodes: newNodes };
-      set({ game: newGame, currentMoveIndex: newNodes.length - 1 });
+      });
+      set({ game: played.game, currentNodeId: played.node.id });
     } catch {
-      // Illegal move — ignore
+      if (!game) set({ game: active, currentNodeId: active.rootId });
     }
+  },
+
+  setEditTool: (tool) => set({ editTool: tool }),
+
+  toggleBoardMark: (point) => {
+    const { game, currentNodeId, editTool } = get();
+    if (editTool === 'play') return;
+    const kind = editTool as BoardMarkKind;
+    const active = game ?? createEmptyGame(19);
+    const nodeId = game ? currentNodeId : active.rootId;
+    const current = getNode(active, nodeId);
+    const marks = toggleMark(current.marks ?? [], point, kind);
+    set({
+      game: {
+        ...active,
+        nodes: {
+          ...active.nodes,
+          [current.id]: { ...current, marks },
+        },
+      },
+      currentNodeId: current.id,
+    });
   },
 
   currentNode: () => {
-    const { game, currentMoveIndex } = get();
+    const { game, currentNodeId } = get();
     if (!game) return null;
-    return game.nodes[currentMoveIndex];
+    return game.nodes[currentNodeId] ?? null;
   },
 
   currentBoard: () => {
-    const { game, currentMoveIndex } = get();
+    const { game, currentNodeId } = get();
     if (!game) return createEmptyBoard(19);
-    return game.nodes[currentMoveIndex].boardState;
+    return getNode(game, currentNodeId).boardState;
   },
 
   currentTurn: () => {
-    const { game, currentMoveIndex } = get();
-    return game?.nodes[currentMoveIndex]?.nextPlayer ?? 'B';
+    const { game, currentNodeId } = get();
+    if (!game) return 'B';
+    return getNode(game, currentNodeId).nextPlayer;
   },
 }));
