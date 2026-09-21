@@ -29,7 +29,7 @@ try {
   const status = runGit(root, ['status', '--short']);
 
   if (!status) {
-    output('Working tree is clean; there is nothing to commit yet.');
+    output('COMMIT: NO — the working tree is clean; there are no local changes to commit.');
     process.exit(0);
   }
 
@@ -43,7 +43,10 @@ try {
 
   const paths = status.split('\n').slice(0, 12).join(', ');
   const suffix = status.split('\n').length > 12 ? ', …' : '';
-  output(`Uncommitted repository changes detected (${diffCheck}). Changed paths: ${paths}${suffix}. Review the diff and run relevant checks before asking whether to commit; this hook never commits or pushes automatically.`);
+  const recommendation = diffCheck === 'passed'
+    ? 'COMMIT: YES — the local changes pass whitespace checks. Review the diff and run relevant tests before committing.'
+    : 'COMMIT: NO — fix the whitespace errors before committing.';
+  output(`${recommendation} Changed paths: ${paths}${suffix}. This hook never commits or pushes automatically.`);
 } catch (error) {
-  output(`Commit check hook could not inspect repository state: ${error.message}`);
+  output(`COMMIT: UNKNOWN — the hook could not inspect repository state: ${error.message}`);
 }
