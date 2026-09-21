@@ -1,0 +1,18 @@
+{
+  "description": "Review repository state after Codex edits",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/check-commit.cjs\"",
+            "timeout": 5,
+            "statusMessage": "Checking repository commit state"
+          }
+        ]
+      }
+    ]
+  }
+}
