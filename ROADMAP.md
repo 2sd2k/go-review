@@ -34,7 +34,7 @@ and every label can be traced to KataGo evidence.
 3. [x] Let users play through KataGo's principal variation and branch into their
    own alternatives without changing the original game.
 4. [x] Add responsive mobile/tablet layouts and accessible board controls.
-5. Save analysis results locally first (IndexedDB), keyed by SGF hash, KataGo
+5. [x] Save analysis results locally first (IndexedDB), keyed by SGF hash, KataGo
    model/version, rules, komi, and visit count so repeat reviews are instant.
 6. Redesign the interface with an Online-Go.com-inspired aesthetic: primarily
    black, white, and restrained neutral grays; remove the current purple tint

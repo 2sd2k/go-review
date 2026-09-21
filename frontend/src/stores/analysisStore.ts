@@ -11,6 +11,7 @@ interface AnalysisState {
 
   // Actions
   addResult: (analysis: MoveAnalysis) => void;
+  setResults: (results: Map<number, MoveAnalysis>) => void;
   setAnalyzing: (analyzing: boolean) => void;
   setProgress: (progress: number, total: number) => void;
   setError: (error: string | null) => void;
@@ -45,6 +46,8 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       return { results: newResults };
     });
   },
+
+  setResults: (results) => set({ results: new Map(results) }),
 
   setAnalyzing: (analyzing) => set({ isAnalyzing: analyzing }),
 

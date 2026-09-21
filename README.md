@@ -34,8 +34,9 @@ npm run dev
 ```
 
 For a deployed frontend, set `VITE_API_URL` to the public HTTP(S) base URL of
-the backend. Set backend `CORS_ORIGINS` to a comma-separated list of allowed
-frontend origins.
+the backend. Set `VITE_KATAGO_MODEL_VERSION` to the deployed KataGo network
+identifier so cached reviews are invalidated when the model changes. Set
+backend `CORS_ORIGINS` to a comma-separated list of allowed frontend origins.
 
 See [ROADMAP.md](./ROADMAP.md) for the recommended build sequence.
 

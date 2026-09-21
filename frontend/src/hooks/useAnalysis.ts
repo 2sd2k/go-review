@@ -3,6 +3,14 @@ import { useAnalysisStore } from '../stores/analysisStore';
 import type { Game } from '../types/game';
 import type { AnalysisSettings } from '../types/analysis';
 import { pointToDisplay } from '../lib/coordinates';
+import { exportSgf } from '../lib/sgf';
+import {
+  getCachedAnalysis,
+  hashText,
+  KATAGO_MODEL_VERSION,
+  makeAnalysisCacheKey,
+  saveCachedAnalysis,
+} from '../lib/analysisCache';
 
 function getWebSocketUrl(): string {
   const configuredApiUrl = import.meta.env.VITE_API_URL as string | undefined;
@@ -21,9 +29,12 @@ function getWebSocketUrl(): string {
 
 export function useAnalysis() {
   const wsRef = useRef<WebSocket | null>(null);
-  const { addResult, setAnalyzing, setProgress, setError, clear } = useAnalysisStore();
+  const analysisRunRef = useRef(0);
+  const { addResult, setResults, setAnalyzing, setProgress, setError, clear } = useAnalysisStore();
 
-  const analyzeGame = useCallback((game: Game, settings: AnalysisSettings) => {
+  const analyzeGame = useCallback(async (game: Game, settings: AnalysisSettings) => {
+    const runId = ++analysisRunRef.current;
+
     // Close existing connection
     if (wsRef.current) {
       wsRef.current.close();
@@ -32,6 +43,26 @@ export function useAnalysis() {
     clear();
     setAnalyzing(true);
     setError(null);
+
+    const sgfHash = await hashText(exportSgf(game));
+    if (runId !== analysisRunRef.current) return;
+    const cacheIdentity = {
+      sgfHash,
+      modelVersion: KATAGO_MODEL_VERSION,
+      rules: settings.rules,
+      komi: settings.komi,
+      maxVisits: settings.maxVisits,
+      boardSize: game.size,
+    };
+    const cacheKey = makeAnalysisCacheKey(cacheIdentity);
+    const cached = await getCachedAnalysis(cacheKey);
+    if (runId !== analysisRunRef.current) return;
+    if (cached) {
+      setResults(new Map(cached.results));
+      setProgress(cached.totalMoves, cached.totalMoves);
+      setAnalyzing(false);
+      return;
+    }
 
     // Convert the official (trunk) line to the format the backend expects.
     const moves: string[][] = [];
@@ -68,6 +99,7 @@ export function useAnalysis() {
     };
 
     ws.onmessage = (event) => {
+      if (runId !== analysisRunRef.current) return;
       const data = JSON.parse(event.data);
 
       switch (data.type) {
@@ -82,6 +114,13 @@ export function useAnalysis() {
 
         case 'complete':
           setAnalyzing(false);
+          void saveCachedAnalysis({
+            ...cacheIdentity,
+            key: cacheKey,
+            totalMoves: data.total_moves ?? 0,
+            results: Array.from(useAnalysisStore.getState().results.entries()),
+            createdAt: Date.now(),
+          });
           break;
 
         case 'error':
@@ -92,16 +131,19 @@ export function useAnalysis() {
     };
 
     ws.onerror = () => {
+      if (runId !== analysisRunRef.current) return;
       setError('Connection to analysis server failed. Is the backend running?');
       setAnalyzing(false);
     };
 
     ws.onclose = () => {
+      if (runId !== analysisRunRef.current) return;
       setAnalyzing(false);
     };
-  }, [addResult, setAnalyzing, setProgress, setError, clear]);
+  }, [addResult, setResults, setAnalyzing, setProgress, setError, clear]);
 
   const stopAnalysis = useCallback(() => {
+    analysisRunRef.current += 1;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
