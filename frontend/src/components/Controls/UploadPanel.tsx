@@ -71,6 +71,15 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label="Upload an SGF file"
         className={`border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors
           ${dragOver
             ? 'border-amber-400 bg-amber-400/10'
@@ -84,6 +93,7 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
           ref={fileInputRef}
           type="file"
           accept=".sgf"
+          aria-label="Choose SGF file"
           onChange={handleInputChange}
           className="hidden"
         />

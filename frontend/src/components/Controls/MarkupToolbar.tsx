@@ -20,6 +20,8 @@ export default function MarkupToolbar() {
             key={tool.id}
             type="button"
             title={tool.title}
+            aria-label={tool.title}
+            aria-pressed={editTool === tool.id}
             onClick={() => setEditTool(tool.id)}
             className={`flex-1 px-2 py-1.5 text-base rounded transition-colors ${
               editTool === tool.id

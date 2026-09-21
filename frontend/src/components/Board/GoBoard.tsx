@@ -52,6 +52,7 @@ export default function GoBoard({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boardAreaRef = useRef<HTMLDivElement>(null);
   const [hoverPoint, setHoverPoint] = useState<Point | null>(null);
+  const [focusPoint, setFocusPoint] = useState<Point | null>(null);
 
   const drawBoard = useCallback(() => {
     const canvas = canvasRef.current;
@@ -209,9 +210,10 @@ export default function GoBoard({
       drawMark(ctx, x, y, stoneRadius, mark.kind, boardState[row]?.[col] ?? null);
     }
 
-    // Draw hover ghost stone or mark
-    if (hoverPoint) {
-      const [hRow, hCol] = hoverPoint;
+    // Draw hover or keyboard-focus ghost stone/mark
+    const previewPoint = hoverPoint ?? focusPoint;
+    if (previewPoint) {
+      const [hRow, hCol] = previewPoint;
       const hx = padding + hCol * cellSize;
       const hy = padding + hRow * cellSize;
       if (editTool !== 'play') {
@@ -224,7 +226,7 @@ export default function GoBoard({
         ctx.globalAlpha = 1.0;
       }
     }
-  }, [boardState, size, lastMove, hoverPoint, nextTurn, ownership, showOwnership, suggestedMoves, showSuggestions, marks, editTool]);
+  }, [boardState, size, lastMove, hoverPoint, focusPoint, nextTurn, ownership, showOwnership, suggestedMoves, showSuggestions, marks, editTool]);
 
   useEffect(() => {
     drawBoard();
@@ -285,19 +287,49 @@ export default function GoBoard({
     setHoverPoint(null);
   }, []);
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const current = focusPoint ?? [Math.floor(size / 2), Math.floor(size / 2)] as Point;
+    let next: Point | null = null;
+    if (e.key === 'ArrowUp') next = [Math.max(0, current[0] - 1), current[1]];
+    if (e.key === 'ArrowDown') next = [Math.min(size - 1, current[0] + 1), current[1]];
+    if (e.key === 'ArrowLeft') next = [current[0], Math.max(0, current[1] - 1)];
+    if (e.key === 'ArrowRight') next = [current[0], Math.min(size - 1, current[1] + 1)];
+
+    if (next) {
+      e.preventDefault();
+      setFocusPoint(next);
+      return;
+    }
+
+    if ((e.key === 'Enter' || e.key === ' ') && onIntersectionClick) {
+      e.preventDefault();
+      onIntersectionClick(current);
+    }
+  }, [focusPoint, onIntersectionClick, size]);
+
+  const selectedPoint = focusPoint ?? [Math.floor(size / 2), Math.floor(size / 2)] as Point;
+  const selectedCoordinate = `${GTP_COLUMNS[selectedPoint[1]]}${size - selectedPoint[0]}`;
+
   return (
     <div
       ref={boardAreaRef}
-      className="aspect-square w-full max-w-full"
-      style={{ width: 'min(calc(100vh - 80px), 100%)', maxWidth: '100%' }}
+      className="board-shell aspect-square max-w-full"
     >
       <canvas
         ref={canvasRef}
         onClick={handleClick}
+        onKeyDown={handleKeyDown}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
-        className="cursor-pointer rounded shadow-lg"
+        className="board-canvas cursor-pointer rounded shadow-lg"
+        role="grid"
+        tabIndex={0}
+        aria-label={`Go board, ${size} by ${size}. Keyboard focus is at ${selectedCoordinate}. Press Enter or Space to play or mark.`}
+        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Space"
       />
+      <span className="sr-only" aria-live="polite">
+        Board focus at {selectedCoordinate}. {nextTurn === 'B' ? 'Black' : 'White'} to play.
+      </span>
     </div>
   );
 }

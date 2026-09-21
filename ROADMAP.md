@@ -29,11 +29,11 @@ and every label can be traced to KataGo evidence.
 
 1. [x] Build a review summary: best moves, mistakes, blunders, biggest turning
    point, and an accuracy-like score for each player.
-2. Make flagged moments the primary navigation path, with previous/next issue
+2. [x] Make flagged moments the primary navigation path, with previous/next issue
    controls and the played move versus best move shown together.
-3. Let users play through KataGo's principal variation and branch into their
+3. [x] Let users play through KataGo's principal variation and branch into their
    own alternatives without changing the original game.
-4. Add responsive mobile/tablet layouts and accessible board controls.
+4. [x] Add responsive mobile/tablet layouts and accessible board controls.
 5. Save analysis results locally first (IndexedDB), keyed by SGF hash, KataGo
    model/version, rules, komi, and visit count so repeat reviews are instant.
 6. Redesign the interface with an Online-Go.com-inspired aesthetic: primarily

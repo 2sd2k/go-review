@@ -74,6 +74,7 @@ function NavButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
       className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800
                  disabled:text-gray-600 text-white rounded transition-colors
                  text-sm select-none"
