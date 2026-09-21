@@ -1,15 +1,14 @@
 {
   "description": "Review repository state after Codex edits",
   "hooks": {
-    "PostToolUse": [
+    "Stop": [
       {
-        "matcher": "^(Bash|apply_patch|Edit|Write)$",
         "hooks": [
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/check-commit.cjs\"",
             "timeout": 5,
-            "statusMessage": "Checking repository commit state"
+            "statusMessage": "Checking whether local changes are ready to commit"
           }
         ]
       }
