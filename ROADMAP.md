@@ -36,7 +36,7 @@ and every label can be traced to KataGo evidence.
 4. [x] Add responsive mobile/tablet layouts and accessible board controls.
 5. [x] Save analysis results locally first (IndexedDB), keyed by SGF hash, KataGo
    model/version, rules, komi, and visit count so repeat reviews are instant.
-6. Redesign the interface with an Online-Go.com-inspired aesthetic: primarily
+6. [x] Redesign the interface with an Online-Go.com-inspired aesthetic: primarily
    black, white, and restrained neutral grays; remove the current purple tint
    and decorative gradients while preserving clear move-quality indicators.
 
