@@ -16,10 +16,10 @@ the alternatives easy to explore, and explain them at the player's level.
    a past position must create a new timeline instead of deleting future moves;
    users must be able to see, compare, and navigate every branch. Import and
    export SGF variations and preserve comments on their original nodes.
-5. Finish rule correctness: carry ko state during local editing and either
+5. [x] Finish rule correctness: carry ko state during local editing and either
    implement positional/situational superko or delegate legality to a proven Go
    board library.
-6. Add a clear analysis settings control: quick/deep visits, rules, komi, and
+6. [x] Add a clear analysis settings control: quick/deep visits, rules, komi, and
    board size.
 
 Exit criterion: a normal or handicap SGF produces stable, reproducible labels
@@ -27,7 +27,7 @@ and every label can be traced to KataGo evidence.
 
 ## Phase 2 — The Chess.com-style review experience
 
-1. Build a review summary: best moves, mistakes, blunders, biggest turning
+1. [x] Build a review summary: best moves, mistakes, blunders, biggest turning
    point, and an accuracy-like score for each player.
 2. Make flagged moments the primary navigation path, with previous/next issue
    controls and the played move versus best move shown together.

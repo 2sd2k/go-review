@@ -2,8 +2,13 @@ import { useCallback, useRef, useState } from 'react';
 import { useGameStore } from '../../stores/gameStore';
 import { exportSgf, parseSgf } from '../../lib/sgf';
 import { useAnalysisStore } from '../../stores/analysisStore';
+import type { Game } from '../../types/game';
 
-export default function UploadPanel() {
+interface UploadPanelProps {
+  onGameLoaded?: (game: Game) => void;
+}
+
+export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
   const { game, loadGame } = useGameStore();
   const clearAnalysis = useAnalysisStore((state) => state.clear);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -20,13 +25,14 @@ export default function UploadPanel() {
           const parsed = parseSgf(text);
           clearAnalysis();
           loadGame(parsed);
+          onGameLoaded?.(parsed);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse SGF file');
         }
       };
       reader.readAsText(file);
     },
-    [clearAnalysis, loadGame]
+    [clearAnalysis, loadGame, onGameLoaded]
   );
 
   const handleDrop = useCallback(

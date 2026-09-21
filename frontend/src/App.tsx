@@ -7,24 +7,31 @@ import MoveTreeView from './components/Analysis/MoveTreeView';
 import WinRateGraph from './components/Analysis/WinRateGraph';
 import ScoreBar from './components/Analysis/ScoreBar';
 import MoveCommentary from './components/Analysis/MoveCommentary';
+import ReviewSummary from './components/Analysis/ReviewSummary';
+import AnalysisSettingsPanel from './components/Controls/AnalysisSettingsPanel';
 import { useGameStore } from './stores/gameStore';
 import { useAnalysisStore } from './stores/analysisStore';
 import { useAnalysis } from './hooks/useAnalysis';
 import { useKeyboardNav } from './hooks/useKeyboardNav';
 import type { Point, StoneColor } from './types/game';
+import { createEmptyGame } from './types/game';
+import { DEFAULT_ANALYSIS_SETTINGS, type AnalysisSettings } from './types/analysis';
+import { normalizeRules } from './lib/gobanRules';
 import { trunkLine } from './lib/moveTree';
 
 function App() {
   useKeyboardNav();
 
-  const { game, currentNodeId, playMove, editTool, toggleBoardMark } = useGameStore();
+  const { game, currentNodeId, playMove, editTool, toggleBoardMark, loadGame } = useGameStore();
   const { results, isAnalyzing, progress, totalMoves, error } = useAnalysisStore();
+  const clearAnalysis = useAnalysisStore((state) => state.clear);
   const { analyzeGame, stopAnalysis } = useAnalysis();
   const currentNode = game?.nodes[currentNodeId] ?? null;
   const nextTurn: StoneColor = currentNode?.nextPlayer ?? 'B';
 
   const [showOwnership, setShowOwnership] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
+  const [settings, setSettings] = useState<AnalysisSettings>(DEFAULT_ANALYSIS_SETTINGS);
 
   const boardState = currentNode?.boardState ?? Array.from({ length: 19 }, () => Array(19).fill(null));
 
@@ -46,8 +53,13 @@ function App() {
   const hasAnalysis = results.size > 0;
   const trunkMoves = game ? Math.max(0, trunkLine(game).length - 1) : 0;
 
+  const updateSettings = (next: AnalysisSettings) => {
+    setSettings(next);
+    if (results.size > 0) clearAnalysis();
+  };
+
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-screen min-h-0 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex-shrink-0 px-4 py-2">
         <h1 className="text-2xl font-bold text-amber-400 text-center">
@@ -56,9 +68,9 @@ function App() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-row justify-center gap-6 px-2 pb-2 min-h-0">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row justify-center gap-4 lg:gap-6 px-2 pb-2 overflow-auto">
         {/* Board section */}
-        <div className="flex-shrink-0 flex items-center justify-center">
+        <div className="flex-none md:flex-1 min-w-0 min-h-0 flex items-center justify-center">
           <GoBoard
             boardState={boardState}
             size={game?.size ?? 19}
@@ -75,11 +87,30 @@ function App() {
         </div>
 
         {/* Right panel */}
-        <div className="flex-shrink-0 flex flex-col gap-2 w-[280px] min-h-0 overflow-y-auto">
+        <div className="w-full md:w-[280px] md:max-w-[280px] flex-shrink-0 flex flex-col gap-2 min-h-0 overflow-y-auto">
           {/* Upload */}
-          <UploadPanel />
+          <UploadPanel
+            onGameLoaded={(loadedGame) => {
+              setSettings((current) => ({
+                ...current,
+                rules: normalizeRules(loadedGame.metadata.rules),
+                komi: loadedGame.metadata.komi ?? current.komi,
+                boardSize: loadedGame.size,
+              }));
+            }}
+          />
 
           <MarkupToolbar />
+
+          <AnalysisSettingsPanel
+            settings={{ ...settings, boardSize: game?.size ?? settings.boardSize }}
+            hasGame={Boolean(game)}
+            onChange={updateSettings}
+            onCreateBoard={() => {
+              clearAnalysis();
+              loadGame(createEmptyGame(settings.boardSize));
+            }}
+          />
 
           {/* Analyze button */}
           {game && (
@@ -93,7 +124,7 @@ function App() {
                 </button>
               ) : (
                 <button
-                  onClick={() => analyzeGame(game)}
+                  onClick={() => analyzeGame(game, settings)}
                   className="w-full px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded transition-colors"
                 >
                   {hasAnalysis ? 'Re-analyze' : 'Analyze Game'}
@@ -104,6 +135,10 @@ function App() {
           )}
 
           {/* Score bar */}
+          {hasAnalysis && (
+            <ReviewSummary />
+          )}
+
           {hasAnalysis && (
             <div className="bg-gray-800/50 rounded-lg p-2 border border-gray-700">
               <ScoreBar />

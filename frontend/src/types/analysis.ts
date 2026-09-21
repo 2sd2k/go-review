@@ -1,5 +1,21 @@
 export type MoveQuality = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder';
 
+export type AnalysisRules = 'chinese' | 'japanese' | 'aga' | 'korean' | 'ing' | 'nz';
+
+export interface AnalysisSettings {
+  maxVisits: number;
+  rules: AnalysisRules;
+  komi: number;
+  boardSize: number;
+}
+
+export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
+  maxVisits: 100,
+  rules: 'chinese',
+  komi: 7.5,
+  boardSize: 19,
+};
+
 export interface SuggestedMove {
   move: string; // e.g. "Q16" or "pass"
   win_rate: number;

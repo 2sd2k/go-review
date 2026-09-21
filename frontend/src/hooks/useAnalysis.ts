@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { useAnalysisStore } from '../stores/analysisStore';
 import type { Game } from '../types/game';
+import type { AnalysisSettings } from '../types/analysis';
 import { pointToDisplay } from '../lib/coordinates';
 
 function getWebSocketUrl(): string {
@@ -22,7 +23,7 @@ export function useAnalysis() {
   const wsRef = useRef<WebSocket | null>(null);
   const { addResult, setAnalyzing, setProgress, setError, clear } = useAnalysisStore();
 
-  const analyzeGame = useCallback((game: Game) => {
+  const analyzeGame = useCallback((game: Game, settings: AnalysisSettings) => {
     // Close existing connection
     if (wsRef.current) {
       wsRef.current.close();
@@ -59,10 +60,10 @@ export function useAnalysis() {
       ws.send(JSON.stringify({
         moves,
         initial_stones: initialStones,
-        rules: game.metadata.rules ?? 'chinese',
-        komi: game.metadata.komi ?? 7.5,
+        rules: settings.rules,
+        komi: settings.komi,
         board_size: game.size,
-        max_visits: 100,
+        max_visits: settings.maxVisits,
       }));
     };
 

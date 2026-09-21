@@ -288,8 +288,8 @@ export default function GoBoard({
   return (
     <div
       ref={boardAreaRef}
-      className="aspect-square"
-      style={{ height: 'calc(100vh - 80px)', maxWidth: 'calc(100vh - 80px)' }}
+      className="aspect-square w-full max-w-full"
+      style={{ width: 'min(calc(100vh - 80px), 100%)', maxWidth: '100%' }}
     >
       <canvas
         ref={canvasRef}
