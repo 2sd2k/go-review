@@ -14,6 +14,7 @@
   "dependencies": {
     "@sabaki/sgf": "^3.4.7",
     "@tailwindcss/vite": "^4.2.2",
+    "goban-engine": "8.3.226",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "recharts": "^3.8.0",

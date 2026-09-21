@@ -1,7 +1,8 @@
 import { parse, stringify } from '@sabaki/sgf';
 import type { Game, GameNode, GameMetadata, BoardState, Move, StoneColor, Point } from '../types/game';
 import { createEmptyBoard } from '../types/game';
-import { applyMove, cloneBoard, opponent } from './goLogic';
+import { cloneBoard, opponent } from './goLogic';
+import { applyMoveWithRules } from './gobanRules';
 import { pointToSgf, sgfToPoint } from './coordinates';
 import { attachChild, getNode } from './moveTree';
 import { marksToSgfProps, parseSgfMarks } from './marks';
@@ -95,21 +96,17 @@ function nextPlayerFor(
 }
 
 function applyPlayedMove(
-  parent: GameNode,
+  game: Game,
+  parentId: number,
   move: Move,
 ): { boardState: BoardState; captures: GameNode['captures']; commentSuffix?: string } {
-  if (move.point === 'pass') {
-    return { boardState: parent.boardState, captures: parent.captures };
-  }
+  const parent = getNode(game, parentId);
 
   try {
-    const result = applyMove(parent.boardState, move.point as Point, move.color);
+    const result = applyMoveWithRules(game, parentId, move);
     return {
-      boardState: result.board,
-      captures: {
-        black: parent.captures.black + (move.color === 'B' ? result.captured.length : 0),
-        white: parent.captures.white + (move.color === 'W' ? result.captured.length : 0),
-      },
+      boardState: result.boardState,
+      captures: result.captures,
     };
   } catch (err) {
     console.warn(`Skipping illegal move ${parent.moveNumber + 1}:`, err);
@@ -154,7 +151,7 @@ function ingestNode(
   let moveNumber = parent.moveNumber;
 
   if (move) {
-    const played = applyPlayedMove(parent, move);
+    const played = applyPlayedMove(game, parentId, move);
     boardState = played.boardState;
     captures = played.captures;
     moveNumber = parent.moveNumber + 1;

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Game, GameNode, StoneColor, Point, BoardState, EditTool, BoardMarkKind } from '../types/game';
 import { createEmptyBoard, createEmptyGame } from '../types/game';
-import { applyMove } from '../lib/goLogic';
+import { applyMoveWithRules } from '../lib/gobanRules';
 import { toggleMark } from '../lib/marks';
 import {
   currentLine,
@@ -105,15 +105,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     const color = current.nextPlayer;
 
     try {
-      const result = applyMove(current.boardState, point, color);
+      const result = applyMoveWithRules(active, current.id, { color, point });
       const played = playFrom(active, current.id, {
         move: { color, point },
-        boardState: result.board,
-        captures: {
-          black: current.captures.black + (color === 'B' ? result.captured.length : 0),
-          white: current.captures.white + (color === 'W' ? result.captured.length : 0),
-        },
-        nextPlayer: color === 'B' ? 'W' : 'B',
+        boardState: result.boardState,
+        captures: result.captures,
+        nextPlayer: result.nextPlayer,
       });
       set({ game: played.game, currentNodeId: played.node.id });
     } catch {

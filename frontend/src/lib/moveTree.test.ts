@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyBoard, createEmptyGame } from '../types/game';
-import { applyMove } from './goLogic';
+import { applyMoveWithRules } from './gobanRules';
 import {
   childIds,
   currentLine,
@@ -16,16 +16,12 @@ import {
 import { parseSgf } from './sgf';
 
 function play(game: ReturnType<typeof createEmptyGame>, parentId: number, row: number, col: number, color: 'B' | 'W') {
-  const parent = game.nodes[parentId];
-  const result = applyMove(parent.boardState, [row, col], color);
+  const result = applyMoveWithRules(game, parentId, { color, point: [row, col] });
   return playFrom(game, parentId, {
     move: { color, point: [row, col] },
-    boardState: result.board,
-    captures: {
-      black: parent.captures.black + (color === 'B' ? result.captured.length : 0),
-      white: parent.captures.white + (color === 'W' ? result.captured.length : 0),
-    },
-    nextPlayer: color === 'B' ? 'W' : 'B',
+    boardState: result.boardState,
+    captures: result.captures,
+    nextPlayer: result.nextPlayer,
   });
 }
 
