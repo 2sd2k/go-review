@@ -28,7 +28,7 @@ interface GameState {
   goToStart: () => void;
   goToEnd: () => void;
   shiftBranch: (delta: number) => void;
-  playMove: (point: Point) => void;
+  playMove: (point: Point | 'pass') => boolean;
   setEditTool: (tool: EditTool) => void;
   toggleBoardMark: (point: Point) => void;
 
@@ -113,8 +113,10 @@ export const useGameStore = create<GameState>((set, get) => ({
         nextPlayer: result.nextPlayer,
       });
       set({ game: played.game, currentNodeId: played.node.id });
+      return true;
     } catch {
       if (!game) set({ game: active, currentNodeId: active.rootId });
+      return false;
     }
   },
 

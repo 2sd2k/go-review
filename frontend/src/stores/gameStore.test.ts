@@ -14,7 +14,7 @@ describe('gameStore variations', () => {
     useGameStore.getState().nextMove();
     const afterBlack = useGameStore.getState().currentNodeId;
 
-    useGameStore.getState().playMove([6, 6]);
+    expect(useGameStore.getState().playMove([6, 6])).toBe(true);
 
     const game = useGameStore.getState().game!;
     const black = getNode(game, afterBlack);
@@ -30,6 +30,16 @@ describe('gameStore variations', () => {
     useGameStore.getState().playMove([3, 3]);
     expect(useGameStore.getState().currentNode()?.move).toEqual({ color: 'B', point: [3, 3] });
     expect(trunkLine(useGameStore.getState().game!)).toHaveLength(3);
+  });
+
+  it('reports rejected moves without changing the current position', () => {
+    useGameStore.getState().loadGame(parseSgf('(;FF[4]GM[1]SZ[9];B[dd])'));
+    useGameStore.getState().goToStart();
+    expect(useGameStore.getState().playMove([0, 0])).toBe(true);
+    const before = useGameStore.getState().currentNodeId;
+
+    expect(useGameStore.getState().playMove([0, 0])).toBe(false);
+    expect(useGameStore.getState().currentNodeId).toBe(before);
   });
 
   it('toggles marks on the current node without playing a stone', () => {

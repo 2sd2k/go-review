@@ -8,6 +8,8 @@ import WinRateGraph from './components/Analysis/WinRateGraph';
 import ScoreBar from './components/Analysis/ScoreBar';
 import MoveCommentary from './components/Analysis/MoveCommentary';
 import ReviewSummary from './components/Analysis/ReviewSummary';
+import FlaggedMoments from './components/Analysis/FlaggedMoments';
+import VariationPlayback from './components/Analysis/VariationPlayback';
 import AnalysisSettingsPanel from './components/Controls/AnalysisSettingsPanel';
 import { useGameStore } from './stores/gameStore';
 import { useAnalysisStore } from './stores/analysisStore';
@@ -59,7 +61,7 @@ function App() {
   };
 
   return (
-    <div className="h-screen min-h-0 flex flex-col overflow-hidden">
+    <div className="min-h-screen md:h-screen flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex-shrink-0 px-4 py-2">
         <h1 className="text-2xl font-bold text-amber-400 text-center">
@@ -68,9 +70,9 @@ function App() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row justify-center gap-4 lg:gap-6 px-2 pb-2 overflow-auto">
+      <main className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row justify-center gap-4 lg:gap-6 px-2 pb-2 overflow-y-auto md:overflow-hidden">
         {/* Board section */}
-        <div className="flex-none md:flex-1 min-w-0 min-h-0 flex items-center justify-center">
+        <div className="flex-none md:flex-1 min-w-0 min-h-0 flex items-center justify-center py-1 md:py-0">
           <GoBoard
             boardState={boardState}
             size={game?.size ?? 19}
@@ -87,7 +89,7 @@ function App() {
         </div>
 
         {/* Right panel */}
-        <div className="w-full md:w-[280px] md:max-w-[280px] flex-shrink-0 flex flex-col gap-2 min-h-0 overflow-y-auto">
+        <aside className="w-full md:w-[280px] md:max-w-[280px] flex-shrink-0 flex flex-col gap-2 min-h-0 md:overflow-y-auto pb-2 md:pb-0">
           {/* Upload */}
           <UploadPanel
             onGameLoaded={(loadedGame) => {
@@ -140,6 +142,14 @@ function App() {
           )}
 
           {hasAnalysis && (
+            <FlaggedMoments />
+          )}
+
+          {hasAnalysis && (
+            <VariationPlayback />
+          )}
+
+          {hasAnalysis && (
             <div className="bg-gray-800/50 rounded-lg p-2 border border-gray-700">
               <ScoreBar />
             </div>
@@ -157,6 +167,7 @@ function App() {
             <div className="flex gap-2">
               <button
                 onClick={() => setShowOwnership(v => !v)}
+                aria-pressed={showOwnership}
                 className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
                   showOwnership ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                 }`}
@@ -165,6 +176,7 @@ function App() {
               </button>
               <button
                 onClick={() => setShowSuggestions(v => !v)}
+                aria-pressed={showSuggestions}
                 className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
                   showSuggestions ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                 }`}
@@ -226,8 +238,8 @@ function App() {
               <MoveTreeView />
             </div>
           </div>
-        </div>
-      </div>
+        </aside>
+      </main>
     </div>
   );
 }
