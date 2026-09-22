@@ -3,6 +3,7 @@ import { useGameStore } from '../../stores/gameStore';
 import { exportSgf, parseSgf } from '../../lib/sgf';
 import { useAnalysisStore } from '../../stores/analysisStore';
 import type { Game } from '../../types/game';
+import { fetchOgsSgf } from '../../lib/ogs';
 
 interface UploadPanelProps {
   onGameLoaded?: (game: Game) => void;
@@ -12,28 +13,64 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
   const { game, loadGame } = useGameStore();
   const clearAnalysis = useAnalysisStore((state) => state.clear);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importRun = useRef(0);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ogsInput, setOgsInput] = useState('');
+  const [isImportingOgs, setIsImportingOgs] = useState(false);
+
+  const handleSgf = useCallback(
+    (text: string) => {
+      const parsed = parseSgf(text);
+      parsed.originalSgf = text;
+      clearAnalysis();
+      loadGame(parsed);
+      onGameLoaded?.(parsed);
+    },
+    [clearAnalysis, loadGame, onGameLoaded]
+  );
 
   const handleFile = useCallback(
     (file: File) => {
+      const run = ++importRun.current;
+      setIsImportingOgs(false);
       setError(null);
+      if (file.size > 5 * 1024 * 1024) {
+        setError('SGF files must be 5 MB or smaller.');
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
+        if (run !== importRun.current) return;
         try {
           const text = e.target?.result as string;
-          const parsed = parseSgf(text);
-          clearAnalysis();
-          loadGame(parsed);
-          onGameLoaded?.(parsed);
+          handleSgf(text);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse SGF file');
         }
       };
       reader.readAsText(file);
+      reader.onerror = () => setError('Could not read this file. Please try again.');
     },
-    [clearAnalysis, loadGame, onGameLoaded]
+    [handleSgf]
   );
+
+  const handleOgsImport = useCallback(async () => {
+    const run = ++importRun.current;
+    setError(null);
+    setIsImportingOgs(true);
+    try {
+      const sgf = await fetchOgsSgf(ogsInput);
+      if (run !== importRun.current) return;
+      handleSgf(sgf);
+      setOgsInput('');
+    } catch (err) {
+      if (run !== importRun.current) return;
+      setError(err instanceof Error ? err.message : 'Failed to import the OGS game');
+    } finally {
+      if (run === importRun.current) setIsImportingOgs(false);
+    }
+  }, [handleSgf, ogsInput]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -98,6 +135,28 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
           className="hidden"
         />
       </div>
+      <form onSubmit={(event) => { event.preventDefault(); void handleOgsImport(); }} className="mt-2">
+        <label htmlFor="ogs-game" className="sr-only">OGS game ID or public URL</label>
+        <div className="flex gap-1">
+          <input
+            id="ogs-game"
+            type="text"
+            value={ogsInput}
+            onChange={(event) => setOgsInput(event.target.value)}
+            placeholder="OGS game ID or URL"
+            className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-200"
+            disabled={isImportingOgs}
+          />
+          <button
+            type="submit"
+            disabled={isImportingOgs || !ogsInput.trim()}
+            className="rounded bg-gray-700 px-2 py-1 text-xs text-gray-200 hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isImportingOgs ? 'Loading…' : 'Import OGS'}
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-gray-500">Public games only; private games can be uploaded as SGF.</p>
+      </form>
       {error && (
         <p className="text-xs text-red-400 mt-1">{error}</p>
       )}
