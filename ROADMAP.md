@@ -45,15 +45,24 @@ important lessons without reading raw engine numbers.
 
 ## Phase 3 — Import and game history
 
-1. Add an “Import OGS game” field accepting a game URL or ID. Public games can
+1. [x] Add an “Import OGS game” field accepting a game URL or ID. Public games can
    be fetched through OGS's SGF endpoint; private games should continue through
    manual file upload unless the user explicitly connects an account.
 2. Keep drag-and-drop SGF as the universal import path for OGS, KGS, Fox,
    Tygem, Pandanet, and desktop editors.
+   Implemented upload and size/read errors; server-specific encoding fixtures
+   remain to be verified.
 3. Add accounts only when persistence is valuable: saved games, review history,
    player preferences, and usage limits.
 4. Store original SGF separately from derived analysis. Use object storage for
    SGFs and a relational database for games, positions, jobs, and annotations.
+   Local foundation implemented: IndexedDB saved-review library preserves
+   original SGF, edited variations, settings, and analysis separately. Cloud
+   object storage, relational persistence, and accounts remain pending.
+
+- [x] Save and reopen reviews locally without an account.
+- [x] Proxy public OGS imports through a fixed-host backend route with timeout,
+  size limit, and private-game/rate-limit errors.
 
 Exit criterion: users can revisit prior reviews and import an OGS game from its
 URL in one step.
@@ -97,9 +106,10 @@ without claiming that KataGo itself speaks natural language.
 
 - Add timeouts and engine-death propagation for every pending KataGo request.
 - Send KataGo termination requests when a WebSocket client cancels.
-- Consume and retain bounded KataGo stderr output for diagnostics.
+- [x] Consume and retain bounded KataGo stderr output for diagnostics.
 - Use engine-returned turn numbers and complete results in arrival order.
 - Avoid retaining ownership arrays for every move unless the UI needs them.
 - Add CI for frontend lint/build, backend tests, and one mocked engine protocol
   test; keep the real-model smoke test optional because it is hardware-specific.
+  Frontend/backend CI added; a subprocess protocol test remains pending.
 - [x] Initialize this folder as its own Git repository and connect it to GitHub.
