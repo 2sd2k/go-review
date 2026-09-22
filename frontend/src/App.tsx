@@ -2,6 +2,7 @@ import { useState } from 'react';
 import GoBoard from './components/Board/GoBoard';
 import GameNavigation from './components/Controls/GameNavigation';
 import UploadPanel from './components/Controls/UploadPanel';
+import ReviewLibrary from './components/Controls/ReviewLibrary';
 import MarkupToolbar from './components/Controls/MarkupToolbar';
 import MoveTreeView from './components/Analysis/MoveTreeView';
 import WinRateGraph from './components/Analysis/WinRateGraph';
@@ -56,6 +57,7 @@ function App() {
   const trunkMoves = game ? Math.max(0, trunkLine(game).length - 1) : 0;
 
   const updateSettings = (next: AnalysisSettings) => {
+    stopAnalysis();
     setSettings(next);
     if (results.size > 0) clearAnalysis();
   };
@@ -93,6 +95,7 @@ function App() {
           {/* Upload */}
           <UploadPanel
             onGameLoaded={(loadedGame) => {
+              stopAnalysis();
               setSettings((current) => ({
                 ...current,
                 rules: normalizeRules(loadedGame.metadata.rules),
@@ -103,6 +106,10 @@ function App() {
           />
 
           <MarkupToolbar />
+          <ReviewLibrary settings={settings} onRestore={(savedSettings) => {
+            stopAnalysis();
+            setSettings(savedSettings);
+          }} />
 
           <AnalysisSettingsPanel
             settings={{ ...settings, boardSize: game?.size ?? settings.boardSize }}
