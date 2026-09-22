@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
 from typing import AsyncIterator
 from uuid import uuid4
 
@@ -25,6 +26,9 @@ class KataGoEngine:
         self._process: asyncio.subprocess.Process | None = None
         self._pending: dict[str, asyncio.Future] = {}
         self._reader_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
+        self.stderr_tail = deque(maxlen=64)
+        self.query_timeout = 120.0
         self._lock = asyncio.Lock()
 
     @property
@@ -65,13 +69,14 @@ class KataGoEngine:
 
         # Start reading stdout for responses
         self._reader_task = asyncio.create_task(self._read_responses())
+        self._stderr_task = asyncio.create_task(self._read_stderr())
 
         # Wait briefly and check it didn't crash immediately
         await asyncio.sleep(0.5)
         if self._process.returncode is not None:
-            stderr = ""
-            if self._process.stderr:
-                stderr = (await self._process.stderr.read()).decode()
+            if self._stderr_task:
+                await self._stderr_task
+            stderr = ''.join(self.stderr_tail)
             raise RuntimeError(f"KataGo failed to start: {stderr}")
 
         logger.info("KataGo started successfully")
@@ -80,6 +85,7 @@ class KataGoEngine:
         """Stop the KataGo process."""
         if self._reader_task:
             self._reader_task.cancel()
+            await asyncio.gather(self._reader_task, return_exceptions=True)
             self._reader_task = None
 
         if self._process and self._process.returncode is None:
@@ -88,6 +94,12 @@ class KataGoEngine:
                 await asyncio.wait_for(self._process.wait(), timeout=5)
             except asyncio.TimeoutError:
                 self._process.kill()
+                await self._process.wait()
+
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            await asyncio.gather(self._stderr_task, return_exceptions=True)
+            self._stderr_task = None
 
         self._process = None
 
@@ -96,6 +108,17 @@ class KataGoEngine:
             if not future.done():
                 future.set_exception(RuntimeError("KataGo stopped"))
         self._pending.clear()
+
+    async def _read_stderr(self):
+        """Drain diagnostics in bounded chunks, including output without newlines."""
+        process = self._process
+        if not process or not process.stderr:
+            return
+        while True:
+            chunk = await process.stderr.read(4096)
+            if not chunk:
+                return
+            self.stderr_tail.append(chunk.decode(errors='replace'))
 
     async def _read_responses(self):
         """Background task that reads KataGo stdout and resolves pending queries."""
@@ -140,10 +163,14 @@ class KataGoEngine:
         self._pending[query_id] = future
 
         query_json = json.dumps(query) + "\n"
-        self._process.stdin.write(query_json.encode())
-        await self._process.stdin.drain()
-
-        return await future
+        try:
+            self._process.stdin.write(query_json.encode())
+            await asyncio.wait_for(self._process.stdin.drain(), self.query_timeout)
+            return await asyncio.wait_for(future, self.query_timeout)
+        finally:
+            self._pending.pop(query_id, None)
+            if not future.done():
+                future.cancel()
 
     async def analyze_position(
         self,
@@ -220,7 +247,7 @@ class KataGoEngine:
         # Yield results as they complete (not necessarily in order)
         for turn, future in futures:
             try:
-                response = await future
+                response = await asyncio.wait_for(future, self.query_timeout)
                 analysis = parse_katago_response(response, turn)
                 comparison = comparisons.get(turn)
                 if comparison:
@@ -247,7 +274,16 @@ class KataGoEngine:
                         comparisons[turn + 1] = comparison
             except Exception as e:
                 logger.error(f"Error analyzing turn {turn}: {e}")
-                continue
+                # Never report an incomplete review as successfully completed.
+                for pending_turn, pending_future in futures:
+                    self._pending.pop(f'{game_id}_t{pending_turn}', None)
+                    if not pending_future.done():
+                        pending_future.cancel()
+                    elif not pending_future.cancelled():
+                        pending_future.exception()
+                raise
+            finally:
+                self._pending.pop(f'{game_id}_t{turn}', None)
 
     async def _get_played_move_comparison(
         self,
