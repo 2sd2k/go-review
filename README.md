@@ -46,9 +46,10 @@ Paste a public OGS game URL or ID into **Import OGS** with the backend running,
 or upload an SGF file (up to 5 MB). Private games require a manual SGF upload.
 The backend only fetches OGS game records; it does not forward account credentials.
 
-Use **Save current review** to keep the game, variations, settings, and current
-analysis in this browser. Reopen it from **Saved reviews** after a refresh.
-Saving the same imported game updates that entry. The original SGF is retained
+Use **Save current review** once to keep the game, variations, settings, and
+current analysis in this browser. Later changes save automatically. Search,
+rename, or delete saved reviews, and reopen one at the last viewed move after
+a refresh. Saving the same imported game updates that entry. The original SGF is retained
 separately from edits. Browser storage is device-specific and may be cleared by
 the browser; download SGF for a portable copy of the game and variations.
 Accounts, cloud sync, and the conversational coach are not implemented yet.

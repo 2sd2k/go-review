@@ -59,6 +59,8 @@ export interface GameMetadata {
 export interface Game {
   /** Imported source is retained separately from edited/exported variations. */
   originalSgf?: string;
+  /** Browser-local saved review identity; excluded from SGF exports. */
+  localReviewId?: string;
   size: number;
   rootId: number;
   nodes: Record<number, GameNode>;

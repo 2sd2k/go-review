@@ -61,6 +61,8 @@ important lessons without reading raw engine numbers.
    object storage, relational persistence, and accounts remain pending.
 
 - [x] Save and reopen reviews locally without an account.
+- [x] Autosave saved reviews, find and rename or delete them, and restore the
+  selected move or variation after reopening.
 - [x] Proxy public OGS imports through a fixed-host backend route with timeout,
   size limit, and private-game/rate-limit errors.
 
