@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseSgf } from './sgf';
-import { buildCoachEvidence } from './coachEvidence';
-import type { MoveAnalysis } from '../types/analysis';
+import { buildCoachEvidence, buildCoachGameContext } from './coachEvidence';
+import { DEFAULT_ANALYSIS_SETTINGS, type MoveAnalysis } from '../types/analysis';
 
 describe('coach evidence', () => {
   it('uses prior candidates to explain the played move and bounds the context', () => {
@@ -29,5 +29,15 @@ describe('coach evidence', () => {
   it('requires KataGo analysis for the selected trunk position', () => {
     const game = parseSgf('(;GM[1]SZ[9];B[aa])');
     expect(buildCoachEvidence(game, game.rootId, new Map())).toBeNull();
+  });
+
+  it('sends only the selected trunk prefix for a focused search', () => {
+    const game = parseSgf('(;GM[1]SZ[9]AB[cc];B[aa];W[];B[bb])');
+    const first = game.nodes[game.nodes[game.rootId].trunkNextId!];
+    const context = buildCoachGameContext(game, first.id, { ...DEFAULT_ANALYSIS_SETTINGS, maxVisits: 500 });
+    expect(context).toMatchObject({
+      moves: [['B', 'A9']], initial_stones: [['B', 'C7']], board_size: 9, max_visits: 200,
+    });
+    expect(context?.moves).toHaveLength(1);
   });
 });

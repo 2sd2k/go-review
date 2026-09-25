@@ -195,6 +195,37 @@ class KataGoEngine:
         }
         return await self._send_query(query)
 
+    async def analyze_candidate(
+        self,
+        *,
+        moves: list[list[str]],
+        initial_stones: list[list[str]],
+        player: str,
+        move: str,
+        rules: str,
+        komi: float,
+        board_size: int,
+        max_visits: int,
+    ) -> SuggestedMove:
+        """Run one focused KataGo search at the supplied position."""
+        response = await self._send_query({
+            "id": f"coach_{uuid4().hex}",
+            "moves": moves,
+            "initialStones": initial_stones,
+            "rules": rules,
+            "komi": komi,
+            "boardXSize": board_size,
+            "boardYSize": board_size,
+            "maxVisits": max_visits,
+            "includeOwnership": False,
+            "allowMoves": [{"player": player, "moves": [move], "untilDepth": 1}],
+        })
+        match = next((info for info in response.get("moveInfos", [])
+                      if same_move(info.get("move"), move)), None)
+        if match is None:
+            raise RuntimeError("KataGo did not evaluate the requested move")
+        return parse_suggested_move(match)
+
     async def analyze_game(
         self,
         moves: list[list[str]],

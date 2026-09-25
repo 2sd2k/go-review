@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../stores/gameStore';
 import { useAnalysisStore } from '../../stores/analysisStore';
-import { buildCoachEvidence } from '../../lib/coachEvidence';
+import { buildCoachEvidence, buildCoachGameContext } from '../../lib/coachEvidence';
+import type { AnalysisSettings } from '../../types/analysis';
 
 interface Turn {
   question: string;
@@ -14,7 +15,7 @@ function coachUrl(): string {
   return new URL('/api/coach', base).toString();
 }
 
-export default function CoachPanel() {
+export default function CoachPanel({ settings }: { settings: AnalysisSettings }) {
   const game = useGameStore(state => state.game);
   const nodeId = useGameStore(state => state.currentNodeId);
   const results = useAnalysisStore(state => state.results);
@@ -45,7 +46,8 @@ export default function CoachPanel() {
       const response = await fetch(coachUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: trimmed, position, history }),
+        body: JSON.stringify({ question: trimmed, position, history,
+          game_context: buildCoachGameContext(game, nodeId, settings) }),
         signal: controller.signal,
       });
       const data = await response.json();

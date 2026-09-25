@@ -1,6 +1,6 @@
 import type { Game } from '../types/game';
-import type { MoveAnalysis, SuggestedMove } from '../types/analysis';
-import { ancestors } from './moveTree';
+import type { AnalysisSettings, MoveAnalysis, SuggestedMove } from '../types/analysis';
+import { ancestors, trunkLine } from './moveTree';
 import { pointToDisplay } from './coordinates';
 
 function candidate(move: SuggestedMove) {
@@ -51,5 +51,21 @@ export function buildCoachEvidence(game: Game, nodeId: number, results: Map<numb
     recent_moves,
     player_rank: mover === 'B' ? game.metadata.blackRank ?? null
       : mover === 'W' ? game.metadata.whiteRank ?? null : null,
+  };
+}
+
+/** The server uses this sequence only to run one bounded, focused KataGo query. */
+export function buildCoachGameContext(game: Game, nodeId: number, settings: AnalysisSettings) {
+  const node = game.nodes[nodeId];
+  if (!node?.trunk) return null;
+  const encode = (move: { color: 'B' | 'W'; point: [number, number] | 'pass' }) =>
+    [move.color, move.point === 'pass' ? 'pass' : pointToDisplay(move.point, game.size)];
+  return {
+    moves: trunkLine(game).slice(1, node.moveNumber + 1).flatMap(entry => entry.move ? [encode(entry.move)] : []),
+    initial_stones: game.initialStones.map(encode),
+    rules: settings.rules,
+    komi: settings.komi,
+    board_size: game.size,
+    max_visits: Math.min(settings.maxVisits, 200),
   };
 }

@@ -159,7 +159,7 @@ function App() {
           )}
 
           {currentAnalysis && (
-            <CoachPanel key={`${gameSessionId}:${currentNodeId}`} />
+            <CoachPanel key={`${gameSessionId}:${currentNodeId}`} settings={settings} />
           )}
 
           {hasAnalysis && (

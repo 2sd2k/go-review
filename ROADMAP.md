@@ -78,7 +78,7 @@ changes, principal variations, game metadata, and the user's rank.
 
 1. [x] Start with position-scoped questions: “Why is this bad?”, “Why not R17?”,
    “Where should Black focus?”, and “Show the tactical sequence.”
-2. Give the LLM tools to request extra KataGo analysis for a proposed move or a
+2. [x] Give the LLM tools to request extra KataGo analysis for a proposed move or a
    deeper variation rather than letting it invent evaluations.
 3. Require explanations to distinguish engine facts from teaching heuristics.
 4. Add rank-aware explanations and concise/technical modes.

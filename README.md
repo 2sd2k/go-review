@@ -60,8 +60,9 @@ Set `OPENAI_API_KEY` on the backend to enable the coach panel for analyzed
 positions. `OPENAI_COACH_MODEL` defaults to `gpt-5-mini` and can be changed.
 The coach sends only the selected position, a short move history, and bounded
 KataGo candidate data to the model. It shows the underlying engine evidence
-separately from the model's explanation. A move missing from KataGo's candidate
-list is reported as unexamined; deeper on-demand analysis is planned next.
+separately from the model's explanation. For an unevaluated candidate, it can
+request one focused KataGo search (up to 200 visits) before answering. Exploratory
+continuations are capped at four moves. This requires the local KataGo engine.
 The API key stays on the backend. Requests set `store: false` on the model API.
 
 ## Test
