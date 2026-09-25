@@ -80,7 +80,7 @@ changes, principal variations, game metadata, and the user's rank.
    “Where should Black focus?”, and “Show the tactical sequence.”
 2. [x] Give the LLM tools to request extra KataGo analysis for a proposed move or a
    deeper variation rather than letting it invent evaluations.
-3. Require explanations to distinguish engine facts from teaching heuristics.
+3. [x] Require explanations to distinguish engine facts from teaching heuristics.
 4. Add rank-aware explanations and concise/technical modes.
 5. Cache answers by position plus question intent, with per-user rate limits and
    token budgets.

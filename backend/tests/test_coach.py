@@ -12,6 +12,11 @@ from app.routers.coach import CoachRequest, ask_coach, generate_answer
 from app.models.schemas import SuggestedMove
 
 
+def model_message(teaching, uncertainty='This depends on further play.'):
+    return {'output': [{'type': 'message', 'content': [{'type': 'output_text',
+        'text': json.dumps({'teaching_explanation': teaching, 'uncertainty': uncertainty})}]}]}
+
+
 def example_request(question='Why was this move bad?', with_context=False):
     payload = {
         'question': question,
@@ -39,7 +44,8 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_candidate_does_not_call_model(self):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), patch('app.routers.coach.generate_answer') as generate:
             answer = await ask_coach(example_request('Why not C3?'))
-        self.assertIn('has not evaluated', answer['answer'])
+        self.assertIn('has not evaluated', answer['teaching_explanation'])
+        self.assertIn('deeper analysis', answer['uncertainty'])
         self.assertIn('KataGo preferred C4', ' '.join(answer['engine_facts']))
         generate.assert_not_called()
 
@@ -48,9 +54,10 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as error:
                 await ask_coach(example_request())
         self.assertEqual(error.exception.status_code, 503)
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), patch('app.routers.coach.generate_answer', return_value=('C4 develops faster.', [])) as generate:
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), patch('app.routers.coach.generate_answer', return_value=('C4 develops faster.', 'The sequence may change.', [])) as generate:
             answer = await ask_coach(example_request('Why not C4?'))
-        self.assertEqual(answer['answer'], 'C4 develops faster.')
+        self.assertEqual(answer['teaching_explanation'], 'C4 develops faster.')
+        self.assertEqual(answer['uncertainty'], 'The sequence may change.')
         self.assertEqual(generate.call_args.args[1], 'secret')
 
     async def test_rejects_invalid_board_and_oversized_history(self):
@@ -66,17 +73,19 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
             })
 
     async def test_generation_keeps_api_key_server_side_and_disables_storage(self):
-        output = {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Play C4.'}]}]}
+        output = model_message('Play C4.')
         response = io.BytesIO(json.dumps(output).encode())
         with patch('app.routers.coach.urlopen') as open_url:
             open_url.return_value.__enter__.return_value = response
-            answer, facts = await generate_answer(example_request(), 'private-key', 'gpt-5-mini')
+            answer, uncertainty, facts = await generate_answer(example_request(), 'private-key', 'gpt-5-mini')
         self.assertEqual(answer, 'Play C4.')
+        self.assertEqual(uncertainty, 'This depends on further play.')
         self.assertEqual(facts, [])
         sent = open_url.call_args.args[0]
         payload = json.loads(sent.data)
         self.assertFalse(payload['store'])
         self.assertEqual(payload['max_output_tokens'], 450)
+        self.assertEqual(payload['text']['format']['name'], 'coach_explanation')
         self.assertNotIn('private-key', sent.data.decode())
 
     async def test_missing_candidate_uses_one_focused_search_and_replays_tool_output(self):
@@ -84,14 +93,13 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
                              'call_id': 'call_1', 'arguments': json.dumps({
                                  'move': 'C3', 'where': 'before', 'continuation': [],
                              })}]}
-        second = {'output': [{'type': 'message', 'content': [
-            {'type': 'output_text', 'text': 'C3 is worth considering.'}]}]}
+        second = model_message('C3 is worth considering.')
         candidate = SuggestedMove(move='C3', win_rate=0.51, score_lead=1.2, visits=80, pv=['C3', 'D3'])
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), \
                 patch('app.routers.coach.call_model', side_effect=[first, second]) as model, \
                 patch('app.routers.coach.engine.analyze_candidate', return_value=candidate) as search:
             answer = await ask_coach(example_request('Why not C3?', with_context=True))
-        self.assertEqual(answer['answer'], 'C3 is worth considering.')
+        self.assertEqual(answer['teaching_explanation'], 'C3 is worth considering.')
         self.assertIn('C3', answer['engine_facts'][-2])
         self.assertEqual(search.call_args.kwargs['moves'], [])
         self.assertEqual(search.call_args.kwargs['max_visits'], 100)
@@ -115,12 +123,11 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
                              'call_id': 'call_2', 'arguments': json.dumps({
                                  'move': 'C3', 'where': 'current', 'continuation': ['D4', 'E5'],
                              })}]}
-        second = {'output': [{'type': 'message', 'content': [
-            {'type': 'output_text', 'text': 'After that line, C3 is viable.'}]}]}
+        second = model_message('After that line, C3 is viable.')
         candidate = SuggestedMove(move='C3', win_rate=0.5, score_lead=0, visits=80, pv=['C3'])
         with patch('app.routers.coach.call_model', side_effect=[first, second]), \
                 patch('app.routers.coach.engine.analyze_candidate', return_value=candidate) as search:
-            answer, facts = await generate_answer(example_request(with_context=True), 'secret', 'gpt-5-mini')
+            answer, _, facts = await generate_answer(example_request(with_context=True), 'secret', 'gpt-5-mini')
         self.assertIn('C3', answer)
         self.assertEqual(search.call_args.kwargs['moves'], [['B', 'A9'], ['W', 'D4'], ['B', 'E5']])
         self.assertIn('D4 → E5', ' '.join(facts))
@@ -133,3 +140,12 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
                 await generate_answer(example_request(with_context=True), 'secret', 'gpt-5-mini')
         self.assertEqual(error.exception.status_code, 422)
         search.assert_not_called()
+
+    async def test_rejects_unstructured_or_empty_explanation(self):
+        for output in ({'output': [{'type': 'message', 'content': [
+                {'type': 'output_text', 'text': 'KataGo says C4 wins.'}]}]},
+                model_message('', 'No evidence')):
+            with self.subTest(output=output), patch('app.routers.coach.call_model', return_value=output):
+                with self.assertRaises(HTTPException) as error:
+                    await generate_answer(example_request(), 'secret', 'gpt-5-mini')
+                self.assertEqual(error.exception.status_code, 502)

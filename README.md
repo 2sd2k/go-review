@@ -63,6 +63,8 @@ KataGo candidate data to the model. It shows the underlying engine evidence
 separately from the model's explanation. For an unevaluated candidate, it can
 request one focused KataGo search (up to 200 visits) before answering. Exploratory
 continuations are capped at four moves. This requires the local KataGo engine.
+The response separates KataGo facts, the coach's teaching interpretation, and
+what remains uncertain; interpretations are not engine conclusions.
 The API key stays on the backend. Requests set `store: false` on the model API.
 
 ## Test

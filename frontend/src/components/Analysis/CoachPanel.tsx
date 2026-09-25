@@ -7,6 +7,7 @@ import type { AnalysisSettings } from '../../types/analysis';
 interface Turn {
   question: string;
   answer: string;
+  uncertainty: string;
   facts: string[];
 }
 
@@ -52,7 +53,9 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'The coach could not answer.');
-      setTurns(previous => [...previous, { question: trimmed, answer: data.answer, facts: data.engine_facts }]);
+      setTurns(previous => [...previous, { question: trimmed,
+        answer: data.teaching_explanation, uncertainty: data.uncertainty,
+        facts: data.engine_facts }]);
       setQuestion('');
     } catch (caught) {
       if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'The coach could not answer.');
@@ -74,11 +77,13 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
         {turns.map((turn, index) => (
           <div key={index} className="text-xs rounded border border-gray-700 p-2">
             <p className="font-semibold">You: {turn.question}</p>
-            <p className="mt-1 whitespace-pre-wrap">Coach: {turn.answer}</p>
-            <details className="mt-1 text-gray-500">
-              <summary className="cursor-pointer">Engine evidence</summary>
+            <p className="mt-1 font-semibold">Coach interpretation</p>
+            <p className="whitespace-pre-wrap">{turn.answer}</p>
+            <p className="mt-1 text-gray-400">What remains uncertain: {turn.uncertainty}</p>
+            <div className="mt-2 border-t border-gray-700 pt-1 text-gray-400">
+              <p className="font-semibold">KataGo engine facts</p>
               <ul className="list-disc pl-4 mt-1">{turn.facts.map((fact, factIndex) => <li key={factIndex}>{fact}</li>)}</ul>
-            </details>
+            </div>
           </div>
         ))}
       </div>
