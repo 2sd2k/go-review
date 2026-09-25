@@ -16,6 +16,7 @@ import {
 
 interface GameState {
   game: Game | null;
+  gameSessionId: number;
   currentNodeId: number;
   editTool: EditTool;
 
@@ -39,10 +40,12 @@ interface GameState {
 
 export const useGameStore = create<GameState>((set, get) => ({
   game: null,
+  gameSessionId: 0,
   currentNodeId: 0,
   editTool: 'play',
 
-  loadGame: (game) => set({ game, currentNodeId: game.rootId, editTool: 'play' }),
+  loadGame: (game) => set(state => ({ game, currentNodeId: game.rootId,
+    editTool: 'play', gameSessionId: state.gameSessionId + 1 })),
 
   goToNode: (id) => {
     const { game } = get();
@@ -112,7 +115,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         captures: result.captures,
         nextPlayer: result.nextPlayer,
       });
-      set({ game: played.game, currentNodeId: played.node.id });
+      set(state => ({ game: played.game, currentNodeId: played.node.id,
+        gameSessionId: game ? state.gameSessionId : state.gameSessionId + 1 }));
       return true;
     } catch {
       if (!game) set({ game: active, currentNodeId: active.rootId });

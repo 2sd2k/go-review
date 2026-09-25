@@ -11,6 +11,7 @@ import MoveCommentary from './components/Analysis/MoveCommentary';
 import ReviewSummary from './components/Analysis/ReviewSummary';
 import FlaggedMoments from './components/Analysis/FlaggedMoments';
 import VariationPlayback from './components/Analysis/VariationPlayback';
+import CoachPanel from './components/Analysis/CoachPanel';
 import AnalysisSettingsPanel from './components/Controls/AnalysisSettingsPanel';
 import { useGameStore } from './stores/gameStore';
 import { useAnalysisStore } from './stores/analysisStore';
@@ -26,6 +27,7 @@ function App() {
   useKeyboardNav();
 
   const { game, currentNodeId, playMove, editTool, toggleBoardMark, loadGame } = useGameStore();
+  const gameSessionId = useGameStore((state) => state.gameSessionId);
   const { results, isAnalyzing, progress, totalMoves, error } = useAnalysisStore();
   const clearAnalysis = useAnalysisStore((state) => state.clear);
   const { analyzeGame, stopAnalysis } = useAnalysis();
@@ -154,6 +156,10 @@ function App() {
 
           {hasAnalysis && (
             <VariationPlayback />
+          )}
+
+          {currentAnalysis && (
+            <CoachPanel key={`${gameSessionId}:${currentNodeId}`} />
           )}
 
           {hasAnalysis && (

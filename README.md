@@ -52,7 +52,17 @@ rename, or delete saved reviews, and reopen one at the last viewed move after
 a refresh. Saving the same imported game updates that entry. The original SGF is retained
 separately from edits. Browser storage is device-specific and may be cleared by
 the browser; download SGF for a portable copy of the game and variations.
-Accounts, cloud sync, and the conversational coach are not implemented yet.
+Accounts and cloud sync are not implemented yet.
+
+## Position coach
+
+Set `OPENAI_API_KEY` on the backend to enable the coach panel for analyzed
+positions. `OPENAI_COACH_MODEL` defaults to `gpt-5-mini` and can be changed.
+The coach sends only the selected position, a short move history, and bounded
+KataGo candidate data to the model. It shows the underlying engine evidence
+separately from the model's explanation. A move missing from KataGo's candidate
+list is reported as unexamined; deeper on-demand analysis is planned next.
+The API key stays on the backend. Requests set `store: false` on the model API.
 
 ## Test
 

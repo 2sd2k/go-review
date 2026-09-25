@@ -76,7 +76,7 @@ Use an LLM as the explanation layer and give it structured, bounded evidence:
 the position, played move, candidate moves, score/win-rate deltas, ownership
 changes, principal variations, game metadata, and the user's rank.
 
-1. Start with position-scoped questions: “Why is this bad?”, “Why not R17?”,
+1. [x] Start with position-scoped questions: “Why is this bad?”, “Why not R17?”,
    “Where should Black focus?”, and “Show the tactical sequence.”
 2. Give the LLM tools to request extra KataGo analysis for a proposed move or a
    deeper variation rather than letting it invent evaluations.

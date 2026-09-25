@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import analysis, upload, ogs
+from app.routers import analysis, upload, ogs, coach
 from app.services.katago import engine
 from app.config import CORS_ORIGINS
 
@@ -43,6 +43,7 @@ app.add_middleware(
 app.include_router(analysis.router)
 app.include_router(upload.router)
 app.include_router(ogs.router)
+app.include_router(coach.router)
 
 
 @app.get("/api/health")
