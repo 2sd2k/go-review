@@ -24,6 +24,8 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
   const [question, setQuestion] = useState('');
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<'concise' | 'technical'>('concise');
+  const [level, setLevel] = useState<'auto' | 'beginner' | 'intermediate' | 'advanced'>('auto');
   const pending = useRef<AbortController | null>(null);
 
   useEffect(() => () => pending.current?.abort(), []);
@@ -47,7 +49,7 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
       const response = await fetch(coachUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: trimmed, position, history,
+        body: JSON.stringify({ question: trimmed, position, history, mode, level,
           game_context: buildCoachGameContext(game, nodeId, settings) }),
         signal: controller.signal,
       });
@@ -73,6 +75,22 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
     <section className="bg-gray-800/50 rounded-lg p-3 border border-gray-700" aria-label="Go coach">
       <h2 className="text-sm font-semibold text-gray-200 mb-1">Ask about move {position.move_number}</h2>
       <p className="text-xs text-gray-500 mb-2">Explanations use the KataGo analysis shown here. Tactical reasons may be uncertain.</p>
+      <div className="mb-2 flex flex-wrap gap-2 text-xs">
+        <label className="flex items-center gap-1">Style
+          <select value={mode} onChange={event => setMode(event.target.value as 'concise' | 'technical')}
+            disabled={waiting} className="rounded border border-gray-600 bg-gray-900 px-1 py-1">
+            <option value="concise">Concise</option><option value="technical">Technical</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1">Teaching level
+          <select value={level} onChange={event => setLevel(event.target.value as typeof level)}
+            disabled={waiting} className="rounded border border-gray-600 bg-gray-900 px-1 py-1">
+            <option value="auto">Auto{position.player_rank ? ` (${position.player_rank})` : ''}</option>
+            <option value="beginner">Beginner</option><option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+        </label>
+      </div>
       <div className="space-y-2 max-h-72 overflow-y-auto" aria-live="polite">
         {turns.map((turn, index) => (
           <div key={index} className="text-xs rounded border border-gray-700 p-2">

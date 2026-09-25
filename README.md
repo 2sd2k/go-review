@@ -65,6 +65,8 @@ request one focused KataGo search (up to 200 visits) before answering. Explorato
 continuations are capped at four moves. This requires the local KataGo engine.
 The response separates KataGo facts, the coach's teaching interpretation, and
 what remains uncertain; interpretations are not engine conclusions.
+Choose concise or technical answers and an auto-detected or manually selected
+teaching level. Auto uses the reviewed player's SGF rank when available.
 The API key stays on the backend. Requests set `store: false` on the model API.
 
 ## Test

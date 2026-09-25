@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.routers.coach import CoachRequest, ask_coach, generate_answer
+from app.routers.coach import CoachRequest, ask_coach, coach_instructions, generate_answer, teaching_level
 from app.models.schemas import SuggestedMove
 
 
@@ -149,3 +149,32 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(HTTPException) as error:
                     await generate_answer(example_request(), 'secret', 'gpt-5-mini')
                 self.assertEqual(error.exception.status_code, 502)
+
+    async def test_rank_aware_instructions_and_modes(self):
+        request = example_request()
+        request.position.player_rank = '14k'
+        self.assertEqual(teaching_level(request), 'beginner')
+        self.assertIn('avoid unexplained jargon', coach_instructions(request))
+        self.assertIn('at most 65 words', coach_instructions(request))
+        request.position.player_rank = '3 dan'
+        request.mode = 'technical'
+        self.assertEqual(teaching_level(request), 'advanced')
+        self.assertIn('precise variations', coach_instructions(request))
+        self.assertIn('at most 180 words', coach_instructions(request))
+        request.level = 'beginner'
+        self.assertEqual(teaching_level(request), 'beginner')
+        request.position.player_rank = None
+        request.level = 'auto'
+        self.assertEqual(teaching_level(request), 'intermediate')
+        with self.assertRaises(ValidationError):
+            CoachRequest.model_validate({**request.model_dump(), 'mode': 'verbose'})
+
+    async def test_selected_style_is_sent_to_model(self):
+        request = example_request()
+        request.mode = 'technical'
+        request.level = 'advanced'
+        with patch('app.routers.coach.call_model', return_value=model_message('Consider C4.')) as model:
+            await generate_answer(request, 'secret', 'gpt-5-mini')
+        instructions = model.call_args.args[0]['instructions']
+        self.assertIn('advanced player', instructions)
+        self.assertIn('technical', instructions)
