@@ -5,16 +5,26 @@ import os
 import unittest
 from unittest.mock import patch
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
-from app.routers.coach import CoachRequest, ask_coach, coach_instructions, generate_answer, teaching_level
+from app.routers.coach import CoachRequest, ask_coach, coach_instructions, generate_answer, log_model_usage, teaching_level
 from app.models.schemas import SuggestedMove
+from app.services.coach_limits import CoachLimiter
 
 
 def model_message(teaching, uncertainty='This depends on further play.'):
     return {'output': [{'type': 'message', 'content': [{'type': 'output_text',
         'text': json.dumps({'teaching_explanation': teaching, 'uncertainty': uncertainty})}]}]}
+
+
+def http_request(client='127.0.0.1'):
+    return Request({'type': 'http', 'method': 'POST', 'path': '/api/coach',
+                    'headers': [], 'client': (client, 12345)})
+
+
+async def ask(request, client='127.0.0.1'):
+    return await ask_coach(request, http_request(client))
 
 
 def example_request(question='Why was this move bad?', with_context=False):
@@ -43,7 +53,7 @@ def example_request(question='Why was this move bad?', with_context=False):
 class CoachTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_candidate_does_not_call_model(self):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), patch('app.routers.coach.generate_answer') as generate:
-            answer = await ask_coach(example_request('Why not C3?'))
+            answer = await ask(example_request('Why not C3?'))
         self.assertIn('has not evaluated', answer['teaching_explanation'])
         self.assertIn('deeper analysis', answer['uncertainty'])
         self.assertIn('KataGo preferred C4', ' '.join(answer['engine_facts']))
@@ -52,10 +62,10 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
     async def test_key_is_required_and_valid_candidate_uses_bounded_evidence(self):
         with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
             with self.assertRaises(HTTPException) as error:
-                await ask_coach(example_request())
+                await ask(example_request())
         self.assertEqual(error.exception.status_code, 503)
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), patch('app.routers.coach.generate_answer', return_value=('C4 develops faster.', 'The sequence may change.', [])) as generate:
-            answer = await ask_coach(example_request('Why not C4?'))
+            answer = await ask(example_request('Why not C4?'))
         self.assertEqual(answer['teaching_explanation'], 'C4 develops faster.')
         self.assertEqual(answer['uncertainty'], 'The sequence may change.')
         self.assertEqual(generate.call_args.args[1], 'secret')
@@ -64,7 +74,7 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
         request = example_request()
         request.position.board_rows[0] = 'B<script>'
         with self.assertRaises(HTTPException) as error:
-            await ask_coach(request)
+            await ask(request)
         self.assertEqual(error.exception.status_code, 422)
         with self.assertRaises(ValidationError):
             CoachRequest.model_validate({
@@ -98,7 +108,7 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), \
                 patch('app.routers.coach.call_model', side_effect=[first, second]) as model, \
                 patch('app.routers.coach.engine.analyze_candidate', return_value=candidate) as search:
-            answer = await ask_coach(example_request('Why not C3?', with_context=True))
+            answer = await ask(example_request('Why not C3?', with_context=True))
         self.assertEqual(answer['teaching_explanation'], 'C3 is worth considering.')
         self.assertIn('C3', answer['engine_facts'][-2])
         self.assertEqual(search.call_args.kwargs['moves'], [])
@@ -114,7 +124,7 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
         request.game_context.moves[0] = ('B', 'B9')
         with patch('app.routers.coach.call_model') as model:
             with self.assertRaises(HTTPException) as error:
-                await ask_coach(request)
+                await ask(request)
         self.assertEqual(error.exception.status_code, 422)
         model.assert_not_called()
 
@@ -178,3 +188,45 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
         instructions = model.call_args.args[0]['instructions']
         self.assertIn('advanced player', instructions)
         self.assertIn('technical', instructions)
+
+    async def test_oversized_context_is_rejected_before_model_or_quota(self):
+        request = example_request(with_context=True)
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), \
+                patch('app.routers.coach.MAX_REQUEST_BYTES', 20), \
+                patch('app.routers.coach.generate_answer') as model, \
+                patch('app.routers.coach.coach_limiter') as limiter:
+            with self.assertRaises(HTTPException) as error:
+                await ask(request)
+        self.assertEqual(error.exception.status_code, 413)
+        model.assert_not_called()
+        limiter.acquire.assert_not_called()
+
+    async def test_model_usage_logs_tokens_without_request_content(self):
+        response = model_message('secret teaching content')
+        response['usage'] = {'input_tokens': 123, 'output_tokens': 45,
+                             'input_tokens_details': {'cached_tokens': 16}}
+        with patch('app.routers.coach.logger.info') as log:
+            log_model_usage(response, 'gpt-5-mini', 'initial')
+        message = log.call_args.args[1]
+        self.assertIn('"input_tokens":123', message)
+        self.assertIn('"cached_input_tokens":16', message)
+        self.assertNotIn('secret teaching content', message)
+
+    async def test_route_rejects_quota_before_model_and_releases_failed_request(self):
+        limiter = CoachLimiter(per_client_limit=2, global_limit=2, max_in_flight=1)
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), \
+                patch('app.routers.coach.coach_limiter', limiter), \
+                patch('app.routers.coach.generate_answer', side_effect=[
+                    HTTPException(502, 'temporary failure'),
+                    ('Try C4.', 'The result depends on follow-up.', []),
+                ]) as model:
+            with self.assertRaises(HTTPException) as failure:
+                await ask(example_request())
+            self.assertEqual(failure.exception.status_code, 502)
+            answer = await ask(example_request())
+            self.assertEqual(answer['teaching_explanation'], 'Try C4.')
+            with self.assertRaises(HTTPException) as limited:
+                await ask(example_request())
+        self.assertEqual(limited.exception.status_code, 429)
+        self.assertIn('Retry-After', limited.exception.headers)
+        self.assertEqual(model.call_count, 2)

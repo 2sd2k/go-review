@@ -1,18 +1,36 @@
 """Position-scoped explanations grounded in bounded KataGo evidence."""
 import asyncio
+import hashlib
+import hmac
 import json
+import logging
 import os
 import re
+import secrets
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request as FastAPIRequest
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Tuple
 
 from app.services.katago import engine
+from app.services.coach_limits import CoachLimiter
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# These limits protect the current single-process prototype. They are not a
+# substitute for authenticated, shared quotas when multiple workers are used.
+MAX_REQUEST_BYTES = 32_768
+MAX_MODEL_OUTPUT_TOKENS = 450  # At most two calls for one coach question.
+coach_limiter = CoachLimiter(
+    per_client_limit=int(os.getenv('COACH_REQUESTS_PER_CLIENT_HOUR', '20')),
+    global_limit=int(os.getenv('COACH_REQUESTS_GLOBAL_HOUR', '100')),
+    max_in_flight=int(os.getenv('COACH_MAX_IN_FLIGHT', '2')),
+)
+_fingerprint_key = secrets.token_bytes(32)
 
 
 class Candidate(BaseModel):
@@ -162,6 +180,23 @@ def call_model(payload: dict, api_key: str) -> dict:
         raise HTTPException(502, 'The explanation service returned an invalid answer.') from error
 
 
+def log_model_usage(data: dict, model: str, stage: str) -> None:
+    """Log cost signals only, never prompts, board states, or client addresses."""
+    usage = data.get('usage')
+    if not isinstance(usage, dict):
+        return
+    input_details = usage.get('input_tokens_details') or {}
+    metrics = {
+        'model': model,
+        'stage': stage,
+        'input_tokens': usage.get('input_tokens'),
+        'output_tokens': usage.get('output_tokens'),
+        'total_tokens': usage.get('total_tokens'),
+        'cached_input_tokens': input_details.get('cached_tokens') if isinstance(input_details, dict) else None,
+    }
+    logger.info('coach_model_usage %s', json.dumps(metrics, separators=(',', ':')))
+
+
 def valid_move(move: str, board_size: int) -> bool:
     if move.lower() == 'pass':
         return True
@@ -210,7 +245,7 @@ async def generate_answer(request: CoachRequest, api_key: str, model: str,
         'model': model,
         'instructions': coach_instructions(request),
         'input': input_items,
-        'max_output_tokens': 450,
+        'max_output_tokens': MAX_MODEL_OUTPUT_TOKENS,
         'store': False,
         'include': ['reasoning.encrypted_content'],
         'text': {'format': EXPLANATION_FORMAT},
@@ -233,6 +268,7 @@ async def generate_answer(request: CoachRequest, api_key: str, model: str,
         if forced_move:
             payload['instructions'] += f' The user asks about {forced_move}; call analyze_candidate for that exact move before answering. Use where="before" unless this is move zero.'
     data = await asyncio.to_thread(call_model, payload, api_key)
+    log_model_usage(data, model, 'initial')
     calls = [item for item in data.get('output', []) if item.get('type') == 'function_call']
     if not calls:
         if forced_move:
@@ -285,12 +321,13 @@ async def generate_answer(request: CoachRequest, api_key: str, model: str,
     }]
     payload['tool_choice'] = 'none'
     final = await asyncio.to_thread(call_model, payload, api_key)
+    log_model_usage(final, model, 'followup')
     teaching, uncertainty = model_explanation(final)
     return teaching, uncertainty, facts
 
 
 @router.post('/api/coach')
-async def ask_coach(request: CoachRequest):
+async def ask_coach(request: CoachRequest, http_request: FastAPIRequest):
     position = request.position
     if len(position.board_rows) != position.board_size or any(
         len(row) != position.board_size or re.search('[^BW.]', row)
@@ -319,7 +356,25 @@ async def ask_coach(request: CoachRequest):
     api_key = os.environ.get('OPENAI_API_KEY')
     if not api_key:
         raise HTTPException(503, 'Set OPENAI_API_KEY on the backend to enable the coach.')
+    request_bytes = request.model_dump_json().encode('utf-8')
+    if len(request_bytes) > MAX_REQUEST_BYTES:
+        raise HTTPException(413, 'This coach question contains too much game context.')
+    fingerprint = hmac.digest(_fingerprint_key, request_bytes, hashlib.sha256)
+    # Use the connection address, never an untrusted X-Forwarded-For header.
+    client = http_request.client.host if http_request.client else 'unknown'
+    repeated = coach_limiter.acquire(client, fingerprint)
+    started = time.monotonic()
+    completed = False
     model = os.environ.get('OPENAI_COACH_MODEL', 'gpt-5-mini')
-    teaching, uncertainty, extra_facts = await generate_answer(request, api_key, model, forced_move)
-    return {'teaching_explanation': teaching, 'uncertainty': uncertainty,
-            'engine_facts': facts + extra_facts}
+    try:
+        teaching, uncertainty, extra_facts = await generate_answer(request, api_key, model, forced_move)
+        completed = True
+        return {'teaching_explanation': teaching, 'uncertainty': uncertainty,
+                'engine_facts': facts + extra_facts}
+    finally:
+        coach_limiter.release()
+        logger.info('coach_request %s', json.dumps({
+            'status': 'ok' if completed else 'failed',
+            'exact_repeat': repeated,
+            'elapsed_ms': round((time.monotonic() - started) * 1000),
+        }, separators=(',', ':')))

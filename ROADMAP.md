@@ -82,8 +82,11 @@ changes, principal variations, game metadata, and the user's rank.
    deeper variation rather than letting it invent evaluations.
 3. [x] Require explanations to distinguish engine facts from teaching heuristics.
 4. [x] Add rank-aware explanations and concise/technical modes.
-5. Cache answers by position plus question intent, with per-user rate limits and
-   token budgets.
+5. [x] Protect the single-process coach prototype with bounded requests,
+   output/tool budgets, temporary per-client and global limits, and usage plus
+   exact-repeat telemetry. Add an answer cache only if measured repeats justify
+   it; distinct Go positions make a broad position cache a poor default.
+   Authenticated per-user quotas are still required before a public launch.
 
 Exit criterion: answers are grounded in engine output, reproducible, and useful
 without claiming that KataGo itself speaks natural language.
@@ -96,7 +99,8 @@ without claiming that KataGo itself speaks natural language.
    interactive queries, and terminate engine work on cancellation.
 3. Stream job events over WebSocket or server-sent events and persist partial
    progress so reconnects work.
-4. Add authentication, quotas, structured logs, metrics, error reporting,
+4. Add authentication and shared per-user quotas (replacing prototype IP limits),
+   structured logs, metrics, error reporting,
    health/readiness checks, and abuse controls.
 5. Pin a supported Python version, then upgrade and lock backend dependencies
    with hashes. The current local Python 3.9 runtime is too old for several

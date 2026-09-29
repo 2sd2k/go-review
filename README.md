@@ -68,6 +68,17 @@ what remains uncertain; interpretations are not engine conclusions.
 Choose concise or technical answers and an auto-detected or manually selected
 teaching level. Auto uses the reviewed player's SGF rank when available.
 The API key stays on the backend. Requests set `store: false` on the model API.
+The prototype coach accepts at most 32 KiB of request context and caps each
+model call at 450 output tokens, with at most two calls and one focused KataGo
+search per question. Its process-local limits default to 20 questions/hour per
+connection address, 100/hour globally, and two simultaneous questions. Set
+`COACH_REQUESTS_PER_CLIENT_HOUR`, `COACH_REQUESTS_GLOBAL_HOUR`, or
+`COACH_MAX_IN_FLIGHT` to adjust them. HTTP 429 responses include `Retry-After`.
+Logs record model token counts, latency, and whether an exact request repeated;
+they do not record questions, game positions, or client addresses. There is no
+answer cache yet. These address-based limits are not authenticated per-user
+quotas and do not coordinate across multiple backend workers. Configure an
+OpenAI project hard spend limit separately before exposing the coach publicly.
 
 ## Test
 
