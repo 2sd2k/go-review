@@ -87,6 +87,8 @@ changes, principal variations, game metadata, and the user's rank.
    exact-repeat telemetry. Add an answer cache only if measured repeats justify
    it; distinct Go positions make a broad position cache a poor default.
    Authenticated per-user quotas are still required before a public launch.
+6. [x] Keep the chat panel visible before analysis and preserve each main-line
+   move's conversation while navigating the open game.
 
 Exit criterion: answers are grounded in engine output, reproducible, and useful
 without claiming that KataGo itself speaks natural language.

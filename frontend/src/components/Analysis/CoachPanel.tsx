@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../stores/gameStore';
 import { useAnalysisStore } from '../../stores/analysisStore';
 import { buildCoachEvidence, buildCoachGameContext } from '../../lib/coachEvidence';
-import type { AnalysisSettings } from '../../types/analysis';
+import type { AnalysisSettings, MoveAnalysis } from '../../types/analysis';
+import type { Game } from '../../types/game';
 
 interface Turn {
   question: string;
@@ -10,6 +11,13 @@ interface Turn {
   uncertainty: string;
   facts: string[];
 }
+
+interface Thread {
+  analysis: MoveAnalysis;
+  turns: Turn[];
+}
+
+type Position = NonNullable<ReturnType<typeof buildCoachEvidence>>;
 
 function coachUrl(): string {
   const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : window.location.origin);
@@ -20,19 +28,75 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
   const game = useGameStore(state => state.game);
   const nodeId = useGameStore(state => state.currentNodeId);
   const results = useAnalysisStore(state => state.results);
-  const [turns, setTurns] = useState<Turn[]>([]);
+  return <CoachPanelContent game={game} nodeId={nodeId} results={results} settings={settings} />;
+}
+
+export function CoachPanelContent({ game, nodeId, results, settings }: {
+  game: Game | null;
+  nodeId: number;
+  results: Map<number, MoveAnalysis>;
+  settings: AnalysisSettings;
+}) {
+  const [threads, setThreads] = useState<Record<number, Thread>>({});
+  const position = game ? buildCoachEvidence(game, nodeId, results) : null;
+  const node = game?.nodes[nodeId];
+  const analysis = node?.trunk ? results.get(node.moveNumber) : undefined;
+  const currentThread = threads[nodeId];
+
+  return (
+    <section className="bg-gray-800/50 rounded-lg p-3 border border-gray-700" aria-label="Go coach">
+      <h2 className="text-sm font-semibold text-gray-200 mb-1">Chat with the Go coach</h2>
+      {!game ? (
+        <CoachUnavailable message="Play a game or upload an SGF, then analyze it to ask about a move." />
+      ) : !position ? (
+        <CoachUnavailable message={node?.trunk
+          ? `Analyze the game to ask about move ${node.moveNumber}.`
+          : 'Coach questions currently support main-line moves. Select an analyzed main-line move to chat.'} />
+      ) : analysis && (
+        <CoachConversation key={nodeId} game={game} nodeId={nodeId} position={position}
+          settings={settings} turns={currentThread?.analysis === analysis ? currentThread.turns : []}
+          onTurn={turn => setThreads(previous => ({ ...previous,
+            [nodeId]: { analysis, turns: [...(previous[nodeId]?.analysis === analysis
+              ? previous[nodeId].turns : []), turn] } }))} />
+      )}
+    </section>
+  );
+}
+
+function CoachUnavailable({ message }: { message: string }) {
+  return (
+    <div>
+      <p id="coach-unavailable" className="text-xs text-gray-400 mb-2">{message}</p>
+      <div className="flex gap-1">
+        <label htmlFor="coach-question" className="sr-only">Question about the selected position</label>
+        <input id="coach-question" disabled aria-describedby="coach-unavailable"
+          placeholder="Ask about this move…" className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-900 px-2 py-1 text-xs disabled:opacity-50" />
+        <button type="button" disabled className="rounded bg-gray-700 px-2 py-1 text-xs disabled:opacity-50">Ask</button>
+      </div>
+    </div>
+  );
+}
+
+function CoachConversation({ game, nodeId, position, settings, turns, onTurn }: {
+  game: Game;
+  nodeId: number;
+  position: Position;
+  settings: AnalysisSettings;
+  turns: Turn[];
+  onTurn: (turn: Turn) => void;
+}) {
   const [question, setQuestion] = useState('');
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'concise' | 'technical'>('concise');
   const [level, setLevel] = useState<'auto' | 'beginner' | 'intermediate' | 'advanced'>('auto');
   const pending = useRef<AbortController | null>(null);
+  const messages = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => () => pending.current?.abort(), []);
-
-  if (!game) return null;
-  const position = buildCoachEvidence(game, nodeId, results);
-  if (!position) return null;
+  useEffect(() => {
+    if (messages.current) messages.current.scrollTop = messages.current.scrollHeight;
+  }, [turns.length]);
 
   const ask = async (text: string) => {
     const trimmed = text.trim();
@@ -55,9 +119,9 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'The coach could not answer.');
-      setTurns(previous => [...previous, { question: trimmed,
+      onTurn({ question: trimmed,
         answer: data.teaching_explanation, uncertainty: data.uncertainty,
-        facts: data.engine_facts }]);
+        facts: data.engine_facts });
       setQuestion('');
     } catch (caught) {
       if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'The coach could not answer.');
@@ -72,8 +136,8 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
     : ['Where should Black focus?', 'What are the best moves?'];
 
   return (
-    <section className="bg-gray-800/50 rounded-lg p-3 border border-gray-700" aria-label="Go coach">
-      <h2 className="text-sm font-semibold text-gray-200 mb-1">Ask about move {position.move_number}</h2>
+    <div>
+      <p className="text-xs font-semibold text-gray-200 mb-1">Ask about move {position.move_number}</p>
       <p className="text-xs text-gray-500 mb-2">Explanations use the KataGo analysis shown here. Tactical reasons may be uncertain.</p>
       <div className="mb-2 flex flex-wrap gap-2 text-xs">
         <label className="flex items-center gap-1">Style
@@ -91,7 +155,7 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
           </select>
         </label>
       </div>
-      <div className="space-y-2 max-h-72 overflow-y-auto" aria-live="polite">
+      <div ref={messages} className="space-y-2 max-h-72 overflow-y-auto" aria-live="polite">
         {turns.map((turn, index) => (
           <div key={index} className="text-xs rounded border border-gray-700 p-2">
             <p className="font-semibold">You: {turn.question}</p>
@@ -120,6 +184,6 @@ export default function CoachPanel({ settings }: { settings: AnalysisSettings })
           className="rounded bg-gray-700 px-2 py-1 text-xs disabled:opacity-50">{waiting ? 'Thinking…' : 'Ask'}</button>
       </form>
       {error && <p role="alert" className="mt-1 text-xs text-red-400">{error}</p>}
-    </section>
+    </div>
   );
 }

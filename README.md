@@ -56,8 +56,13 @@ Accounts and cloud sync are not implemented yet.
 
 ## Position coach
 
-Set `OPENAI_API_KEY` on the backend to enable the coach panel for analyzed
-positions. `OPENAI_COACH_MODEL` defaults to `gpt-5-mini` and can be changed.
+The chat panel is always visible in the right sidebar. Play or upload a game,
+run analysis, then select an analyzed main-line move to ask a question. Chat
+history is kept per move while the game remains open; loading another game
+starts fresh. Questions about variations are not supported yet. Set
+`OPENAI_API_KEY` on the backend to receive answers. Without it, the panel
+remains visible but the backend reports that the key is needed when you ask.
+`OPENAI_COACH_MODEL` defaults to `gpt-5-mini` and can be changed.
 The coach sends only the selected position, a short move history, and bounded
 KataGo candidate data to the model. It shows the underlying engine evidence
 separately from the model's explanation. For an unevaluated candidate, it can

@@ -107,6 +107,8 @@ function App() {
             }}
           />
 
+          <CoachPanel key={gameSessionId} settings={settings} />
+
           <MarkupToolbar />
           <ReviewLibrary settings={settings} onRestore={(savedSettings) => {
             stopAnalysis();
@@ -156,10 +158,6 @@ function App() {
 
           {hasAnalysis && (
             <VariationPlayback />
-          )}
-
-          {currentAnalysis && (
-            <CoachPanel key={`${gameSessionId}:${currentNodeId}`} settings={settings} />
           )}
 
           {hasAnalysis && (
