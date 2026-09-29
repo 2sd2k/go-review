@@ -95,8 +95,10 @@ without claiming that KataGo itself speaks natural language.
 
 ## Phase 5 — Production architecture
 
-1. Move analysis into queued jobs. A web process should not own the only KataGo
-   subprocess once multiple users are supported.
+1. [x] Move full-game analysis into queued jobs. The API and a separate KataGo
+   worker now share a bounded SQLite queue on one host. A distributed broker
+   will be needed before scaling across hosts; focused coach searches still
+   start a lazy API-side engine until interactive work moves to workers.
 2. Run one or more warm GPU workers, enforce per-job limits, prioritize
    interactive queries, and terminate engine work on cancellation.
 3. Stream job events over WebSocket or server-sent events and persist partial

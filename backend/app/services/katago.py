@@ -249,72 +249,69 @@ class KataGoEngine:
         comparisons: dict[int, tuple[SuggestedMove, SuggestedMove, float, float]] = {}
 
         game_id = uuid4().hex
-        for turn in range(len(moves) + 1):
-            query_id = f"{game_id}_t{turn}"
-            moves_so_far = moves[:turn]
+        try:
+            for turn in range(len(moves) + 1):
+                query_id = f"{game_id}_t{turn}"
+                query = {
+                    "id": query_id,
+                    "moves": moves[:turn],
+                    "initialStones": initial_stones or [],
+                    "rules": rules,
+                    "komi": komi,
+                    "boardXSize": board_size,
+                    "boardYSize": board_size,
+                    "maxVisits": visits,
+                    "includeOwnership": True,
+                }
+                future = asyncio.get_event_loop().create_future()
+                self._pending[query_id] = future
+                futures.append((turn, future))
+                self._process.stdin.write((json.dumps(query) + "\n").encode())
 
-            query = {
-                "id": query_id,
-                "moves": moves_so_far,
-                "initialStones": initial_stones or [],
-                "rules": rules,
-                "komi": komi,
-                "boardXSize": board_size,
-                "boardYSize": board_size,
-                "maxVisits": visits,
-                "includeOwnership": True,
-            }
+            await self._process.stdin.drain()
 
-            future = asyncio.get_event_loop().create_future()
-            self._pending[query_id] = future
-
-            query_json = json.dumps(query) + "\n"
-            self._process.stdin.write(query_json.encode())
-
-            futures.append((turn, future))
-
-        await self._process.stdin.drain()
-
-        # Yield results as they complete (not necessarily in order)
-        for turn, future in futures:
-            try:
-                response = await asyncio.wait_for(future, self.query_timeout)
-                analysis = parse_katago_response(response, turn)
-                comparison = comparisons.get(turn)
-                if comparison:
-                    played_move, best_move, win_rate_loss, point_loss = comparison
-                    analysis.played_move = played_move
-                    analysis.best_move = best_move
-                    analysis.win_rate_loss = win_rate_loss
-                    analysis.point_loss = point_loss
-                yield analysis
-
-                if turn < len(moves):
-                    comparison = await self._get_played_move_comparison(
-                        game_id=game_id,
-                        turn=turn,
-                        position_response=response,
-                        moves=moves,
-                        initial_stones=initial_stones or [],
-                        rules=rules,
-                        komi=komi,
-                        board_size=board_size,
-                        max_visits=visits,
-                    )
+            # Comparisons for a played move depend on its preceding position,
+            # so process turns in order even if KataGo answers out of order.
+            for turn, future in futures:
+                try:
+                    response = await asyncio.wait_for(future, self.query_timeout)
+                    analysis = parse_katago_response(response, turn)
+                    comparison = comparisons.get(turn)
                     if comparison:
-                        comparisons[turn + 1] = comparison
-            except Exception as e:
-                logger.error(f"Error analyzing turn {turn}: {e}")
-                # Never report an incomplete review as successfully completed.
-                for pending_turn, pending_future in futures:
-                    self._pending.pop(f'{game_id}_t{pending_turn}', None)
-                    if not pending_future.done():
-                        pending_future.cancel()
-                    elif not pending_future.cancelled():
-                        pending_future.exception()
-                raise
-            finally:
-                self._pending.pop(f'{game_id}_t{turn}', None)
+                        played_move, best_move, win_rate_loss, point_loss = comparison
+                        analysis.played_move = played_move
+                        analysis.best_move = best_move
+                        analysis.win_rate_loss = win_rate_loss
+                        analysis.point_loss = point_loss
+                    yield analysis
+
+                    if turn < len(moves):
+                        comparison = await self._get_played_move_comparison(
+                            game_id=game_id,
+                            turn=turn,
+                            position_response=response,
+                            moves=moves,
+                            initial_stones=initial_stones or [],
+                            rules=rules,
+                            komi=komi,
+                            board_size=board_size,
+                            max_visits=visits,
+                        )
+                        if comparison:
+                            comparisons[turn + 1] = comparison
+                except Exception as error:
+                    logger.error("Error analyzing turn %s: %s", turn, error)
+                    raise
+                finally:
+                    self._pending.pop(f"{game_id}_t{turn}", None)
+        finally:
+            # Also run when a worker closes this generator after cancellation.
+            for pending_turn, pending_future in futures:
+                self._pending.pop(f"{game_id}_t{pending_turn}", None)
+                if not pending_future.done():
+                    pending_future.cancel()
+                elif not pending_future.cancelled():
+                    pending_future.exception()
 
     async def _get_played_move_comparison(
         self,

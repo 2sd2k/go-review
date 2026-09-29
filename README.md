@@ -8,7 +8,8 @@ coach.
 ## Current architecture
 
 - `frontend/`: React 19, TypeScript, Vite, Zustand, Recharts, and a canvas goban
-- `backend/`: FastAPI WebSocket API and a long-lived KataGo analysis subprocess
+- `backend/`: FastAPI WebSocket API, a SQLite job queue, and a separate
+  long-lived KataGo worker process
 - KataGo's JSON analysis engine is the source of win rate, score lead,
   ownership, and principal variations
 
@@ -25,7 +26,14 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-In a second terminal:
+In a second terminal, from `backend/` with the same virtual environment and
+KataGo settings, start the analysis worker:
+
+```sh
+python -m app.worker
+```
+
+In a third terminal:
 
 ```sh
 cd frontend
@@ -37,6 +45,16 @@ For a deployed frontend, set `VITE_API_URL` to the public HTTP(S) base URL of
 the backend. Set `VITE_KATAGO_MODEL_VERSION` to the deployed KataGo network
 identifier so cached reviews are invalidated when the model changes. Set
 backend `CORS_ORIGINS` to a comma-separated list of allowed frontend origins.
+The API and worker must share `ANALYSIS_JOB_DB` (defaults to
+`backend/analysis_jobs.sqlite3`). This SQLite queue supports separate processes
+on one host; it is not a multi-host job broker. The API reports worker
+availability at `/api/health` and refuses new analyses while no worker is
+online. Closing the analysis connection cancels its queued job. A worker
+checks cancellation between results and restarts KataGo to discard that game's
+pending queries; immediate interruption of an in-flight search is Phase 5.2.
+Queued game records and engine results are stored in this local database. Finished
+jobs are removed after one day when a new job is submitted; the database is
+not encrypted or suitable for shared hosting without additional controls.
 
 See [ROADMAP.md](./ROADMAP.md) for the recommended build sequence.
 

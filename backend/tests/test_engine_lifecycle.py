@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -7,6 +8,26 @@ from app.services.katago import KataGoEngine
 
 
 class EngineLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_closing_game_stream_cleans_unfinished_queries(self):
+        engine = KataGoEngine()
+        unfinished = []
+
+        def write(payload):
+            query_id = json.loads(payload)["id"]
+            future = engine._pending[query_id]
+            if query_id.endswith("_t0"):
+                future.set_result({"rootInfo": {"currentPlayer": "B"}, "moveInfos": []})
+            else:
+                unfinished.append(future)
+
+        engine._process = SimpleNamespace(returncode=None, stdin=SimpleNamespace(
+            write=Mock(side_effect=write), drain=AsyncMock()))
+        stream = engine.analyze_game(moves=[["B", "D4"]])
+        self.assertEqual((await stream.__anext__()).move_number, 0)
+        await stream.aclose()
+        self.assertEqual(engine._pending, {})
+        self.assertTrue(unfinished[0].cancelled())
+
     async def test_query_timeout_cleans_pending(self):
         engine = KataGoEngine()
         engine.query_timeout = 0.01

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -5,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import analysis, upload, ogs, coach
+from app.services.analysis_jobs import get_job_store
 from app.services.katago import engine
 from app.config import CORS_ORIGINS
 
@@ -14,19 +16,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: try to start KataGo (non-fatal if it fails)
-    try:
-        await engine.start()
-        logger.info("KataGo engine started")
-    except Exception as e:
-        logger.warning(f"KataGo not available: {e}")
-        logger.warning("Analysis features will be unavailable until KataGo is configured")
-
+    # Full-game analysis runs in a separate worker, never in this API process.
     yield
-
-    # Shutdown
+    # A focused coach query may have started a separate, lazy engine here.
     await engine.stop()
-    logger.info("KataGo engine stopped")
 
 
 app = FastAPI(title="Go Game Assistant API", lifespan=lifespan)
@@ -50,5 +43,6 @@ app.include_router(coach.router)
 async def health():
     return {
         "status": "ok",
-        "katago": engine.is_running,
+        "analysis_worker": await asyncio.to_thread(get_job_store().worker_alive),
+        "coach_katago": engine.is_running,
     }

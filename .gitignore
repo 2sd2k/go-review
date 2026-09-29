@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 backend/analysis_logs/
+backend/analysis_jobs.sqlite3*
 
 # Frontend
 frontend/node_modules/

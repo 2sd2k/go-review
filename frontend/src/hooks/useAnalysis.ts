@@ -88,6 +88,10 @@ export function useAnalysis() {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (runId !== analysisRunRef.current) {
+        ws.close();
+        return;
+      }
       ws.send(JSON.stringify({
         moves,
         initial_stones: initialStones,
