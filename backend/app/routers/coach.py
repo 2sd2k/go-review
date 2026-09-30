@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request as FastAPIRequest
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Tuple
 
-from app.services.katago import engine
+from app.services.interactive_analysis import request_candidate_analysis
 from app.services.coach_limits import CoachLimiter
 
 router = APIRouter()
@@ -300,7 +300,7 @@ async def generate_answer(request: CoachRequest, api_key: str, model: str,
         moves.append([player, part.upper()])
         player = 'W' if player == 'B' else 'B'
     try:
-        candidate = await engine.analyze_candidate(
+        candidate = await request_candidate_analysis(
             moves=moves, initial_stones=[list(item) for item in context.initial_stones],
             player=player, move=move, rules=context.rules, komi=context.komi,
             board_size=context.board_size, max_visits=context.max_visits,

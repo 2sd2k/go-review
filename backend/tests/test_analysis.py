@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 from pydantic import ValidationError
 
-from app.models.schemas import AnalysisRequest
+from app.models.schemas import AnalysisRequest, CandidateAnalysisRequest
 from app.models.schemas import SuggestedMove
 from app.services.katago import KataGoEngine, calculate_move_losses, parse_katago_response
 
@@ -21,6 +21,14 @@ class AnalysisRequestTests(unittest.TestCase):
     def test_rejects_invalid_color_and_limits(self):
         with self.assertRaises(ValidationError):
             AnalysisRequest(moves=[["X", "D4"]], board_size=26, max_visits=0)
+        with self.assertRaises(ValidationError):
+            AnalysisRequest(moves=[], max_visits=1001)
+        with self.assertRaises(ValidationError):
+            AnalysisRequest(moves=[("B", "D4")] * 1000, max_visits=1000)
+        with self.assertRaises(ValidationError):
+            AnalysisRequest(moves=[("B", "D4")] * 300, max_visits=1000)
+        with self.assertRaises(ValidationError):
+            CandidateAnalysisRequest(moves=[], player="B", move="D4", max_visits=201)
 
 
 class KataGoResponseTests(unittest.TestCase):

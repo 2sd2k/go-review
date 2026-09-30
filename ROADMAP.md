@@ -97,10 +97,11 @@ without claiming that KataGo itself speaks natural language.
 
 1. [x] Move full-game analysis into queued jobs. The API and a separate KataGo
    worker now share a bounded SQLite queue on one host. A distributed broker
-   will be needed before scaling across hosts; focused coach searches still
-   start a lazy API-side engine until interactive work moves to workers.
-2. Run one or more warm GPU workers, enforce per-job limits, prioritize
-   interactive queries, and terminate engine work on cancellation.
+   will be needed before scaling across hosts.
+2. [x] Run one or more warm GPU workers, enforce per-job limits, prioritize
+   interactive queries, and terminate engine work on cancellation. Focused
+   coach searches now share the worker queue and get higher KataGo priority;
+   cancelled searches no longer restart the shared engine.
 3. Stream job events over WebSocket or server-sent events and persist partial
    progress so reconnects work.
 4. Add authentication and shared per-user quotas (replacing prototype IP limits),
@@ -115,7 +116,7 @@ without claiming that KataGo itself speaks natural language.
 ## Near-term technical backlog
 
 - Add timeouts and engine-death propagation for every pending KataGo request.
-- Send KataGo termination requests when a WebSocket client cancels.
+- [x] Send KataGo termination requests when a WebSocket client cancels.
 - [x] Consume and retain bounded KataGo stderr output for diagnostics.
 - Use engine-returned turn numbers and complete results in arrival order.
 - Avoid retaining ownership arrays for every move unless the UI needs them.

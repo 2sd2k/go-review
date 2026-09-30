@@ -16,6 +16,7 @@ router = APIRouter()
 async def analyze_game(ws: WebSocket):
     origin = ws.headers.get("origin")
     if origin and origin not in CORS_ORIGINS:
+        logger.warning("Rejected analysis WebSocket origin %r", origin)
         await ws.close(code=1008, reason="Origin not allowed")
         return
 

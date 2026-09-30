@@ -11,9 +11,14 @@ class EngineLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_closing_game_stream_cleans_unfinished_queries(self):
         engine = KataGoEngine()
         unfinished = []
+        terminated = []
 
         def write(payload):
-            query_id = json.loads(payload)["id"]
+            query = json.loads(payload)
+            if query.get("action") == "terminate":
+                terminated.append(query["terminateId"])
+                return
+            query_id = query["id"]
             future = engine._pending[query_id]
             if query_id.endswith("_t0"):
                 future.set_result({"rootInfo": {"currentPlayer": "B"}, "moveInfos": []})
@@ -27,14 +32,18 @@ class EngineLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await stream.aclose()
         self.assertEqual(engine._pending, {})
         self.assertTrue(unfinished[0].cancelled())
+        self.assertEqual(len(terminated), 1)
 
     async def test_query_timeout_cleans_pending(self):
         engine = KataGoEngine()
         engine.query_timeout = 0.01
-        engine._process = SimpleNamespace(returncode=None, stdin=SimpleNamespace(write=Mock(), drain=AsyncMock()))
+        sent = []
+        engine._process = SimpleNamespace(returncode=None, stdin=SimpleNamespace(
+            write=Mock(side_effect=lambda payload: sent.append(json.loads(payload))), drain=AsyncMock()))
         with self.assertRaises(asyncio.TimeoutError):
             await engine._send_query({'id': 'slow'})
         self.assertEqual(engine._pending, {})
+        self.assertEqual(sent[-1]["terminateId"], "slow")
 
     async def test_eof_rejects_pending_queries(self):
         engine = KataGoEngine()

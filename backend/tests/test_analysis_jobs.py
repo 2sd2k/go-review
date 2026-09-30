@@ -1,11 +1,14 @@
 import tempfile
 import unittest
+import sqlite3
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
-from app.models.schemas import AnalysisRequest, MoveAnalysis
+from app.models.schemas import AnalysisRequest, CandidateAnalysisRequest, MoveAnalysis, SuggestedMove
 from app.services.analysis_jobs import AnalysisJobStore, QueueFullError
-from app.worker import process_one_job
+from app.services.interactive_analysis import request_candidate_analysis
+from app.worker import process_one_job, process_one_candidate
 
 
 def request():
@@ -15,6 +18,10 @@ def request():
 def result(move_number):
     return MoveAnalysis(move_number=move_number, current_player="B", win_rate=0.5,
                         score_lead=0, top_moves=[], ownership=[])
+
+
+def candidate_request():
+    return CandidateAnalysisRequest(moves=[], player="B", move="D4", board_size=9, max_visits=10)
 
 
 class FakeEngine:
@@ -77,6 +84,33 @@ class JobStoreTests(unittest.TestCase):
         self.assertFalse(self.store.complete(job_id, "worker-a"))
         self.assertEqual(self.store.get_job(job_id)["state"], "error")
 
+    def test_candidate_claims_before_a_queued_game(self):
+        game_id = self.store.enqueue(request())
+        candidate_id = self.store.enqueue_candidate(candidate_request())
+        self.assertEqual(self.store.claim("worker-a")[0], candidate_id)
+        self.assertEqual(self.store.claim("worker-b")[0], game_id)
+
+    def test_existing_database_is_upgraded_in_place(self):
+        old_path = Path(self.temp.name) / "old.sqlite3"
+        with sqlite3.connect(old_path) as db:
+            db.execute("""CREATE TABLE jobs (id TEXT PRIMARY KEY, request_json TEXT NOT NULL,
+                        state TEXT NOT NULL, total_moves INTEGER NOT NULL,
+                        completed_count INTEGER NOT NULL DEFAULT 0, worker_id TEXT,
+                        error TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL)""")
+        upgraded = AnalysisJobStore(old_path)
+        self.assertEqual(upgraded.get_job(upgraded.enqueue_candidate(candidate_request()))["kind"], "candidate")
+
+    def test_legacy_oversized_job_fails_without_stopping_queue(self):
+        legacy = self.store.enqueue(request())
+        with self.store._connection() as db:
+            db.execute("UPDATE jobs SET request_json=? WHERE id=?",
+                       ('{"moves": [], "max_visits": 100000}', legacy))
+        valid = self.store.enqueue_candidate(candidate_request())
+        # Candidate work stays first; the invalid game is retired on its next claim.
+        self.assertEqual(self.store.claim("worker-a")[0], valid)
+        self.assertIsNone(self.store.claim("worker-a", "game"))
+        self.assertEqual(self.store.get_job(legacy)["state"], "error")
+
 
 class AnalysisWorkerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -123,27 +157,94 @@ class AnalysisWorkerTests(unittest.IsolatedAsyncioTestCase):
         store = self.store
 
         class CancellingEngine:
-            stopped = False
-            restarted = False
+            closed = False
 
             async def analyze_game(self, **kwargs):
-                yield result(0)
-                store.cancel(job_id)
-                yield result(1)
-
-            async def stop(self):
-                self.stopped = True
-
-            async def start(self):
-                self.restarted = True
+                try:
+                    yield result(0)
+                    store.cancel(job_id)
+                    yield result(1)
+                finally:
+                    self.closed = True
 
         fake = CancellingEngine()
         await process_one_job(store, "worker-a", fake)
-        self.assertTrue(fake.stopped)
-        self.assertTrue(fake.restarted)
+        self.assertTrue(fake.closed)
         self.assertEqual(store.get_job(job_id)["state"], "cancelled")
         self.assertEqual([event["type"] for event in store.events_since(job_id, 0)],
                          ["result", "cancelled"])
+
+    async def test_in_flight_game_is_cancelled_before_first_result(self):
+        job_id = self.store.enqueue(request())
+        class SlowEngine:
+            closed = False
+            async def analyze_game(self, **kwargs):
+                try:
+                    await asyncio.Event().wait()
+                    yield result(0)
+                finally:
+                    self.closed = True
+
+        fake = SlowEngine()
+        task = asyncio.create_task(process_one_job(self.store, "worker-a", fake))
+        for _ in range(100):
+            if self.store.get_job(job_id)["state"] == "running":
+                break
+            await asyncio.sleep(0.01)
+        self.store.cancel(job_id)
+        await asyncio.wait_for(task, timeout=2)
+        self.assertTrue(fake.closed)
+        self.assertEqual(self.store.get_job(job_id)["state"], "cancelled")
+
+    async def test_coach_query_uses_prioritized_worker_job(self):
+        class CandidateEngine:
+            async def analyze_candidate(self, **kwargs):
+                return SuggestedMove(move="D4", win_rate=0.55, score_lead=1, visits=10, pv=["D4"])
+
+        self.store.heartbeat("worker-a")
+        with patch("app.services.interactive_analysis.get_job_store", return_value=self.store):
+            reply = asyncio.create_task(request_candidate_analysis(
+                moves=[], initial_stones=[], player="B", move="D4", rules="chinese",
+                komi=7.5, board_size=9, max_visits=10))
+            for _ in range(100):
+                with self.store._connection() as db:
+                    row = db.execute("SELECT id FROM jobs WHERE kind='candidate' AND state='queued'").fetchone()
+                if row:
+                    break
+                await asyncio.sleep(0.01)
+            await process_one_candidate(self.store, "worker-a", CandidateEngine())
+            candidate = await asyncio.wait_for(reply, timeout=2)
+        self.assertEqual(candidate.move, "D4")
+        self.assertEqual(candidate.visits, 10)
+
+    async def test_candidate_completes_while_game_search_is_running(self):
+        class SharedEngine:
+            game_started = asyncio.Event()
+            game_closed = False
+
+            async def analyze_game(self, **kwargs):
+                try:
+                    self.game_started.set()
+                    await asyncio.Event().wait()
+                    yield result(0)
+                finally:
+                    self.game_closed = True
+
+            async def analyze_candidate(self, **kwargs):
+                return SuggestedMove(move="D4", win_rate=0.55, score_lead=1,
+                                     visits=10, pv=["D4"])
+
+        fake = SharedEngine()
+        game_id = self.store.enqueue(request())
+        game_task = asyncio.create_task(process_one_job(self.store, "worker-a", fake))
+        await asyncio.wait_for(fake.game_started.wait(), timeout=2)
+        candidate_id = self.store.enqueue_candidate(candidate_request())
+        await process_one_candidate(self.store, "worker-a", fake)
+        self.assertEqual(self.store.get_job(candidate_id)["state"], "complete")
+        self.assertEqual(self.store.get_job(game_id)["state"], "running")
+        self.store.cancel(game_id)
+        await asyncio.wait_for(game_task, timeout=2)
+        self.assertTrue(fake.game_closed)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,19 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import analysis, upload, ogs, coach
 from app.services.analysis_jobs import get_job_store
-from app.services.katago import engine
 from app.config import CORS_ORIGINS
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Full-game analysis runs in a separate worker, never in this API process.
+    # Both full-game and focused coach analysis run in separate workers.
     yield
-    # A focused coach query may have started a separate, lazy engine here.
-    await engine.stop()
 
 
 app = FastAPI(title="Go Game Assistant API", lifespan=lifespan)
@@ -44,5 +36,4 @@ async def health():
     return {
         "status": "ok",
         "analysis_worker": await asyncio.to_thread(get_job_store().worker_alive),
-        "coach_katago": engine.is_running,
     }

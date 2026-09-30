@@ -45,16 +45,23 @@ For a deployed frontend, set `VITE_API_URL` to the public HTTP(S) base URL of
 the backend. Set `VITE_KATAGO_MODEL_VERSION` to the deployed KataGo network
 identifier so cached reviews are invalidated when the model changes. Set
 backend `CORS_ORIGINS` to a comma-separated list of allowed frontend origins.
+Local development defaults allow `localhost` and `127.0.0.1` on ports
+5173–5179 and 3000, so Vite can fall back to the next free port. If the
+WebSocket still returns 403, check the rejected `Origin` in the backend log
+and add that exact origin to `CORS_ORIGINS` before restarting Uvicorn.
 The API and worker must share `ANALYSIS_JOB_DB` (defaults to
 `backend/analysis_jobs.sqlite3`). This SQLite queue supports separate processes
 on one host; it is not a multi-host job broker. The API reports worker
 availability at `/api/health` and refuses new analyses while no worker is
 online. Closing the analysis connection cancels its queued job. A worker
-checks cancellation between results and restarts KataGo to discard that game's
-pending queries; immediate interruption of an in-flight search is Phase 5.2.
-Queued game records and engine results are stored in this local database. Finished
-jobs are removed after one day when a new job is submitted; the database is
-not encrypted or suitable for shared hosting without additional controls.
+also cancels in-flight work and asks KataGo to terminate its unfinished
+queries without restarting the engine. Game jobs are capped at 1,000 visits
+per position, 500,000 total visits, and 20 minutes; focused coach searches
+are capped at 200 visits and 45 seconds. Queued game records and engine
+results are stored in this local database. Finished jobs are removed after
+one day when a new job is submitted; the database is not encrypted or
+suitable for shared hosting without additional controls. Restart both the
+API and worker after changing backend code if they are not running with reload.
 
 See [ROADMAP.md](./ROADMAP.md) for the recommended build sequence.
 
@@ -85,7 +92,8 @@ The coach sends only the selected position, a short move history, and bounded
 KataGo candidate data to the model. It shows the underlying engine evidence
 separately from the model's explanation. For an unevaluated candidate, it can
 request one focused KataGo search (up to 200 visits) before answering. Exploratory
-continuations are capped at four moves. This requires the local KataGo engine.
+continuations are capped at four moves. Focused searches use the same running
+KataGo worker as game reviews, with higher query priority.
 The response separates KataGo facts, the coach's teaching interpretation, and
 what remains uncertain; interpretations are not engine conclusions.
 Choose concise or technical answers and an auto-detected or manually selected

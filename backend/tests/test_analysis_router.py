@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.models.schemas import MoveAnalysis
+from app.config import DEFAULT_DEV_ORIGINS
 from app.routers.analysis import analyze_game
 from app.services.analysis_jobs import AnalysisJobStore
 from app.worker import process_one_job
@@ -17,6 +18,7 @@ class FakeWebSocket:
     def __init__(self):
         self.sent = []
         self.disconnected = asyncio.Event()
+        self.closed_code = None
 
     async def accept(self):
         pass
@@ -31,6 +33,9 @@ class FakeWebSocket:
     async def send_text(self, text):
         self.sent.append(json.loads(text))
 
+    async def close(self, code, reason):
+        self.closed_code = code
+
 
 class FakeEngine:
     async def analyze_game(self, **kwargs):
@@ -40,6 +45,17 @@ class FakeEngine:
 
 
 class AnalysisRouterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_vite_fallback_port_is_allowed_by_default(self):
+        self.assertIn("http://localhost:5174", DEFAULT_DEV_ORIGINS)
+        self.assertIn("http://127.0.0.1:5174", DEFAULT_DEV_ORIGINS)
+
+    async def test_unknown_origin_is_rejected_before_queueing(self):
+        ws = FakeWebSocket()
+        ws.headers = {"origin": "https://not-allowed.example"}
+        with patch("app.routers.analysis.logger.warning"):
+            await analyze_game(ws)
+        self.assertEqual(ws.closed_code, 1008)
+
     async def test_websocket_relays_queued_worker_results(self):
         with tempfile.TemporaryDirectory() as directory:
             store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")

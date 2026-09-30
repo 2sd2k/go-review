@@ -107,7 +107,7 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
         candidate = SuggestedMove(move='C3', win_rate=0.51, score_lead=1.2, visits=80, pv=['C3', 'D3'])
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), \
                 patch('app.routers.coach.call_model', side_effect=[first, second]) as model, \
-                patch('app.routers.coach.engine.analyze_candidate', return_value=candidate) as search:
+                patch('app.routers.coach.request_candidate_analysis', return_value=candidate) as search:
             answer = await ask(example_request('Why not C3?', with_context=True))
         self.assertEqual(answer['teaching_explanation'], 'C3 is worth considering.')
         self.assertIn('C3', answer['engine_facts'][-2])
@@ -136,7 +136,7 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
         second = model_message('After that line, C3 is viable.')
         candidate = SuggestedMove(move='C3', win_rate=0.5, score_lead=0, visits=80, pv=['C3'])
         with patch('app.routers.coach.call_model', side_effect=[first, second]), \
-                patch('app.routers.coach.engine.analyze_candidate', return_value=candidate) as search:
+                patch('app.routers.coach.request_candidate_analysis', return_value=candidate) as search:
             answer, _, facts = await generate_answer(example_request(with_context=True), 'secret', 'gpt-5-mini')
         self.assertIn('C3', answer)
         self.assertEqual(search.call_args.kwargs['moves'], [['B', 'A9'], ['W', 'D4'], ['B', 'E5']])
@@ -145,7 +145,7 @@ class CoachTests(unittest.IsolatedAsyncioTestCase):
             'move': 'C3', 'where': 'current', 'continuation': ['A1'] * 5,
         })
         with patch('app.routers.coach.call_model', return_value=first), \
-                patch('app.routers.coach.engine.analyze_candidate') as search:
+                patch('app.routers.coach.request_candidate_analysis') as search:
             with self.assertRaises(HTTPException) as error:
                 await generate_answer(example_request(with_context=True), 'secret', 'gpt-5-mini')
         self.assertEqual(error.exception.status_code, 422)

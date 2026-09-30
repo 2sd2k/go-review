@@ -28,10 +28,15 @@ KATAGO_REPORT_PERSPECTIVE = "BLACK"
 # Server settings
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8000"))
+DEFAULT_DEV_ORIGINS = [
+    f"http://{host}:{port}"
+    for host in ("localhost", "127.0.0.1")
+    for port in range(5173, 5180)
+] + ["http://localhost:3000", "http://127.0.0.1:3000"]
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
-        "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+        "CORS_ORIGINS", ",".join(DEFAULT_DEV_ORIGINS)
     ).split(",")
     if origin.strip()
 ]

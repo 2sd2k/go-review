@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 MoveTuple = tuple[Literal["B", "W"], str]
 
@@ -14,7 +14,26 @@ class AnalysisRequest(BaseModel):
     rules: str = "chinese"
     komi: Annotated[float, Field(ge=-150, le=150)] = 7.5
     board_size: Annotated[int, Field(ge=2, le=25)] = 19
-    max_visits: Annotated[int, Field(ge=1, le=100_000)] = 100
+    max_visits: Annotated[int, Field(ge=1, le=1_000)] = 100
+
+    @model_validator(mode="after")
+    def bounded_work(self):
+        # One root search per position, plus at most one forced played-move
+        # search per move if KataGo did not explore that candidate enough.
+        if (2 * len(self.moves) + 1) * self.max_visits > 500_000:
+            raise ValueError("game analysis exceeds the per-job visit budget")
+        return self
+
+
+class CandidateAnalysisRequest(BaseModel):
+    moves: Annotated[List[MoveTuple], Field(max_length=1000)]
+    initial_stones: Annotated[List[MoveTuple], Field(max_length=625)] = Field(default_factory=list)
+    player: Literal["B", "W"]
+    move: Annotated[str, Field(min_length=2, max_length=8)]
+    rules: str = "chinese"
+    komi: Annotated[float, Field(ge=-150, le=150)] = 7.5
+    board_size: Annotated[int, Field(ge=2, le=25)] = 19
+    max_visits: Annotated[int, Field(ge=1, le=200)] = 100
 
 
 class SuggestedMove(BaseModel):

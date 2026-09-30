@@ -163,14 +163,32 @@ class KataGoEngine:
         self._pending[query_id] = future
 
         query_json = json.dumps(query) + "\n"
+        completed = False
         try:
             self._process.stdin.write(query_json.encode())
             await asyncio.wait_for(self._process.stdin.drain(), self.query_timeout)
-            return await asyncio.wait_for(future, self.query_timeout)
+            response = await asyncio.wait_for(future, self.query_timeout)
+            completed = True
+            return response
         finally:
+            if not completed:
+                await self._terminate_queries([query_id])
             self._pending.pop(query_id, None)
             if not future.done():
                 future.cancel()
+
+    async def _terminate_queries(self, query_ids: list[str]) -> None:
+        """Ask KataGo to stop exact pending searches without restarting the engine."""
+        if not query_ids or not self.is_running or not self._process.stdin:
+            return
+        try:
+            payload = "".join(json.dumps({
+                "id": f"terminate_{uuid4().hex}", "action": "terminate", "terminateId": query_id,
+            }) + "\n" for query_id in query_ids)
+            self._process.stdin.write(payload.encode())
+            await asyncio.wait_for(self._process.stdin.drain(), timeout=5)
+        except (OSError, RuntimeError, asyncio.TimeoutError) as error:
+            logger.warning("Could not terminate %s KataGo searches: %s", len(query_ids), error)
 
     async def analyze_position(
         self,
@@ -217,6 +235,7 @@ class KataGoEngine:
             "boardXSize": board_size,
             "boardYSize": board_size,
             "maxVisits": max_visits,
+            "priority": 10,
             "includeOwnership": False,
             "allowMoves": [{"player": player, "moves": [move], "untilDepth": 1}],
         })
@@ -249,6 +268,7 @@ class KataGoEngine:
         comparisons: dict[int, tuple[SuggestedMove, SuggestedMove, float, float]] = {}
 
         game_id = uuid4().hex
+        completed_all = False
         try:
             for turn in range(len(moves) + 1):
                 query_id = f"{game_id}_t{turn}"
@@ -261,6 +281,7 @@ class KataGoEngine:
                     "boardXSize": board_size,
                     "boardYSize": board_size,
                     "maxVisits": visits,
+                    "priority": 0,
                     "includeOwnership": True,
                 }
                 future = asyncio.get_event_loop().create_future()
@@ -304,8 +325,13 @@ class KataGoEngine:
                     raise
                 finally:
                     self._pending.pop(f"{game_id}_t{turn}", None)
+            completed_all = True
         finally:
             # Also run when a worker closes this generator after cancellation.
+            if not completed_all:
+                await self._terminate_queries([
+                    f"{game_id}_t{turn}" for turn, future in futures if not future.done()
+                ])
             for pending_turn, pending_future in futures:
                 self._pending.pop(f"{game_id}_t{pending_turn}", None)
                 if not pending_future.done():
