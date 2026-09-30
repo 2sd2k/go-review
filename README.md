@@ -42,7 +42,8 @@ npm run dev
 ```
 
 For a deployed frontend, set `VITE_API_URL` to the public HTTP(S) base URL of
-the backend. Set `VITE_KATAGO_MODEL_VERSION` to the deployed KataGo network
+the backend. Use HTTPS in production so auth tokens travel over HTTPS/WSS.
+Set `VITE_KATAGO_MODEL_VERSION` to the deployed KataGo network
 identifier so cached reviews are invalidated when the model changes. Set
 backend `CORS_ORIGINS` to a comma-separated list of allowed frontend origins.
 Local development defaults allow `localhost` and `127.0.0.1` on ports
@@ -68,6 +69,38 @@ suitable for shared hosting without additional controls. Restart both the
 API and worker after changing backend code if they are not running with reload.
 
 See [ROADMAP.md](./ROADMAP.md) for the recommended build sequence.
+
+## Managed sign-in and operations
+
+Local development still works without an auth project. For managed sign-in,
+create a Supabase project, enable email Magic Links, and allow your frontend
+origin in Supabase's Auth URL configuration (for example,
+`http://localhost:5173` or the actual Vite port). Set these environment
+variables before starting each process:
+
+| Frontend | Backend | Value |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` | `SUPABASE_URL` | Your project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | `SUPABASE_PUBLISHABLE_KEY` | Its publishable key |
+
+Set `AUTH_REQUIRED=1` on the backend for any public deployment. The frontend
+publishable key is safe to expose; **never** put a Supabase secret or service-role
+key in a `VITE_` variable. The backend verifies each bearer token with your
+Supabase Auth service and associates game-analysis jobs with the verified user.
+Existing anonymous jobs cannot be resumed after auth is enabled. Authenticated
+users currently get at most two active game reviews and ten new reviews per
+hour; the coach uses SQLite-backed per-user and global quotas shared by API
+processes on the same host. This does not add cloud review storage or sync.
+
+`/api/health/live` reports API liveness; `/api/health/ready` returns 503 unless
+the SQLite database, KataGo worker, and auth configuration are ready.
+`/api/metrics` is disabled unless `METRICS_TOKEN` is set on the backend; then
+send that token in `X-Metrics-Token` to read route-level request counts and
+total durations. Responses carry `X-Request-ID`, and server logs record route
+templates, status, latency, and errors without question text, tokens, or SGF
+content. Metrics are per API process; use a central collector for multi-host
+deployments. A hosted error-reporting sink and live Supabase sign-in test are
+still pending.
 
 ## Import and saved reviews
 
@@ -103,17 +136,19 @@ what remains uncertain; interpretations are not engine conclusions.
 Choose concise or technical answers and an auto-detected or manually selected
 teaching level. Auto uses the reviewed player's SGF rank when available.
 The API key stays on the backend. Requests set `store: false` on the model API.
-The prototype coach accepts at most 32 KiB of request context and caps each
+The coach accepts at most 32 KiB of request context and caps each
 model call at 450 output tokens, with at most two calls and one focused KataGo
-search per question. Its process-local limits default to 20 questions/hour per
-connection address, 100/hour globally, and two simultaneous questions. Set
-`COACH_REQUESTS_PER_CLIENT_HOUR`, `COACH_REQUESTS_GLOBAL_HOUR`, or
-`COACH_MAX_IN_FLIGHT` to adjust them. HTTP 429 responses include `Retry-After`.
-Logs record model token counts, latency, and whether an exact request repeated;
-they do not record questions, game positions, or client addresses. There is no
-answer cache yet. These address-based limits are not authenticated per-user
-quotas and do not coordinate across multiple backend workers. Configure an
-OpenAI project hard spend limit separately before exposing the coach publicly.
+search per question. With Supabase configured, shared SQLite limits default to
+20 questions/hour per authenticated user, 100/hour globally, and two
+simultaneous questions. Set `COACH_REQUESTS_PER_USER_HOUR`,
+`COACH_REQUESTS_GLOBAL_HOUR`, or `COACH_MAX_IN_FLIGHT` to adjust them. Without
+Supabase, the original process-local address-based limits remain for local
+development (`COACH_REQUESTS_PER_CLIENT_HOUR`). HTTP 429 responses include `Retry-After`.
+Coach usage records include model token counts, latency, and whether an exact
+request repeated; they do not include questions or game positions. Uvicorn's
+default access log may still record connection addresses. There is no
+answer cache yet. Configure an OpenAI project hard spend limit separately
+before exposing the coach publicly.
 
 ## Test
 

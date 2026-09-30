@@ -1,11 +1,12 @@
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import WebSocketDisconnect
+from fastapi import HTTPException, Request, WebSocketDisconnect
 
 from app.models.schemas import AnalysisRequest, MoveAnalysis
 from app.config import DEFAULT_DEV_ORIGINS
@@ -49,6 +50,42 @@ class FakeEngine:
 
 
 class AnalysisRouterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authenticated_job_cannot_be_replayed_or_cancelled_by_other_user(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")
+            store.heartbeat("worker-a")
+            config = {"SUPABASE_URL": "https://project.supabase.co",
+                      "SUPABASE_PUBLISHABLE_KEY": "public-key"}
+            with patch.dict(os.environ, config), \
+                    patch("app.services.auth._verify_token", return_value="user-a"), \
+                    patch("app.routers.analysis.get_job_store", return_value=store):
+                start = FakeWebSocket({"job_id": "a" * 32, "access_token": "a.b.c",
+                                       "moves": [["B", "D4"]], "board_size": 9})
+                relay = asyncio.create_task(analyze_game(start))
+                for _ in range(100):
+                    if start.sent:
+                        break
+                    await asyncio.sleep(0.01)
+                job_id = start.sent[0]["job_id"]
+                start.disconnected.set()
+                await asyncio.wait_for(relay, timeout=2)
+                self.assertEqual(store.get_job(job_id)["owner_id"], "user-a")
+                with store._connection() as db:
+                    persisted = db.execute("SELECT request_json FROM jobs WHERE id=?", (job_id,)).fetchone()[0]
+                self.assertNotIn("a.b.c", persisted)
+
+                with patch("app.services.auth._verify_token", return_value="user-b"):
+                    replay = FakeWebSocket({"action": "resume", "job_id": job_id,
+                                            "access_token": "x.y.z"})
+                    await analyze_game(replay)
+                    self.assertEqual(replay.sent[0]["type"], "error")
+                    self.assertEqual(store.get_job(job_id)["state"], "queued")
+                    http = Request({"type": "http", "method": "DELETE",
+                                    "headers": [(b"authorization", b"Bearer x.y.z")]})
+                    with self.assertRaises(HTTPException) as denied:
+                        await cancel_analysis(job_id, http)
+                    self.assertEqual(denied.exception.status_code, 404)
+
     async def test_local_vite_fallback_port_is_allowed_by_default(self):
         self.assertIn("http://localhost:5174", DEFAULT_DEV_ORIGINS)
         self.assertIn("http://127.0.0.1:5174", DEFAULT_DEV_ORIGINS)
@@ -59,6 +96,12 @@ class AnalysisRouterTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.routers.analysis.logger.warning"):
             await analyze_game(ws)
         self.assertEqual(ws.closed_code, 1008)
+
+    async def test_oversized_websocket_request_is_rejected_before_queueing(self):
+        ws = FakeWebSocket({"moves": [], "padding": "x" * 256_000})
+        await analyze_game(ws)
+        self.assertEqual(ws.sent[0]["type"], "error")
+        self.assertIn("too large", ws.sent[0]["error"])
 
     async def test_websocket_relays_queued_worker_results(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -116,7 +159,8 @@ class AnalysisRouterTests(unittest.IsolatedAsyncioTestCase):
             store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")
             job_id = store.enqueue(AnalysisRequest(moves=[], board_size=9))
             with patch("app.routers.analysis.get_job_store", return_value=store):
-                await cancel_analysis(job_id)
+                await cancel_analysis(job_id, Request({"type": "http", "method": "DELETE",
+                                                      "path": f"/api/analysis/jobs/{job_id}", "headers": []}))
             self.assertEqual(store.get_job(job_id)["state"], "cancelled")
 
     async def test_resume_replays_partial_progress_and_socket_cancel(self):

@@ -19,9 +19,12 @@ class QueueFullError(RuntimeError):
 
 
 class AnalysisJobStore:
-    def __init__(self, path: str | Path, max_active: int = 16):
+    def __init__(self, path: str | Path, max_active: int = 16,
+                 max_user_active: int = 2, max_user_hour: int = 10):
         self.path = Path(path)
         self.max_active = max_active
+        self.max_user_active = max_user_active
+        self.max_user_hour = max_user_hour
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -36,6 +39,7 @@ class AnalysisJobStore:
                     error TEXT,
                     kind TEXT NOT NULL DEFAULT 'game',
                     response_json TEXT,
+                    owner_id TEXT,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 );
@@ -57,12 +61,16 @@ class AnalysisJobStore:
                     last_seen REAL NOT NULL
                 );
             """)
+            db.execute("BEGIN IMMEDIATE")
             # Existing Phase 5.1 databases keep their queued and completed jobs.
             columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
             if "kind" not in columns:
                 db.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'game'")
             if "response_json" not in columns:
                 db.execute("ALTER TABLE jobs ADD COLUMN response_json TEXT")
+            if "owner_id" not in columns:
+                db.execute("ALTER TABLE jobs ADD COLUMN owner_id TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS jobs_owner_created ON jobs(owner_id, created_at)")
 
     @contextmanager
     def _connection(self):
@@ -78,7 +86,8 @@ class AnalysisJobStore:
         finally:
             db.close()
 
-    def enqueue(self, request: AnalysisRequest, job_id: str | None = None) -> str:
+    def enqueue(self, request: AnalysisRequest, job_id: str | None = None,
+                owner_id: str | None = None) -> str:
         now = time.time()
         job_id = job_id or uuid4().hex
         request_json = request.model_dump_json()
@@ -88,17 +97,25 @@ class AnalysisJobStore:
             # Finished jobs are kept briefly for diagnostics, then reclaimed.
             db.execute("DELETE FROM jobs WHERE state IN ('complete', 'error', 'cancelled') AND updated_at < ?",
                        (now - 86_400,))
-            existing = db.execute("SELECT kind, request_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+            existing = db.execute("SELECT kind, request_json, owner_id FROM jobs WHERE id=?", (job_id,)).fetchone()
             if existing:
-                if existing["kind"] != "game" or existing["request_json"] != request_json:
+                if (existing["kind"] != "game" or existing["request_json"] != request_json
+                        or existing["owner_id"] != owner_id):
                     raise ValueError("Analysis job ID belongs to a different request")
                 return job_id
             active = db.execute("SELECT count(*) FROM jobs WHERE kind='game' AND state IN ('queued', 'running')").fetchone()[0]
             if active >= self.max_active:
                 raise QueueFullError("Analysis queue is full. Please try again later.")
-            db.execute("""INSERT INTO jobs(id, request_json, state, total_moves, created_at, updated_at)
-                          VALUES (?, ?, 'queued', ?, ?, ?)""",
-                       (job_id, request_json, len(request.moves), now, now))
+            if owner_id:
+                user_active = db.execute("""SELECT count(*) FROM jobs WHERE owner_id=? AND kind='game'
+                                            AND state IN ('queued', 'running')""", (owner_id,)).fetchone()[0]
+                user_recent = db.execute("""SELECT count(*) FROM jobs WHERE owner_id=? AND kind='game'
+                                            AND created_at>?""", (owner_id, now - 3600)).fetchone()[0]
+                if user_active >= self.max_user_active or user_recent >= self.max_user_hour:
+                    raise QueueFullError("You have reached the analysis job limit. Try again later.")
+            db.execute("""INSERT INTO jobs(id, request_json, state, total_moves, owner_id, created_at, updated_at)
+                          VALUES (?, ?, 'queued', ?, ?, ?, ?)""",
+                       (job_id, request_json, len(request.moves), owner_id, now, now))
         return job_id
 
     def enqueue_candidate(self, request: CandidateAnalysisRequest) -> str:
@@ -122,6 +139,10 @@ class AnalysisJobStore:
             db.execute("""INSERT INTO workers(id, last_seen) VALUES (?, ?)
                           ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen""",
                        (worker_id, time.time()))
+
+    def ping(self) -> bool:
+        with self._connection() as db:
+            return db.execute("SELECT 1").fetchone()[0] == 1
 
     def unregister_worker(self, worker_id: str) -> None:
         with self._connection() as db:
@@ -181,7 +202,7 @@ class AnalysisJobStore:
 
     def get_job(self, job_id: str):
         with self._connection() as db:
-            row = db.execute("SELECT state, kind, worker_id, total_moves, completed_count, error, response_json FROM jobs WHERE id=?",
+            row = db.execute("SELECT state, kind, worker_id, total_moves, completed_count, error, response_json, owner_id FROM jobs WHERE id=?",
                              (job_id,)).fetchone()
         return dict(row) if row else None
 

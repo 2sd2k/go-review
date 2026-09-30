@@ -54,6 +54,17 @@ class JobStoreTests(unittest.TestCase):
         with self.store._connection() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0], 1)
 
+    def test_owned_jobs_cannot_be_reused_by_another_user(self):
+        store = AnalysisJobStore(self.path, max_active=16, max_user_active=1)
+        job_id = "b" * 32
+        self.assertEqual(store.enqueue(request(), job_id, "user-a"), job_id)
+        self.assertEqual(store.get_job(job_id)["owner_id"], "user-a")
+        with self.assertRaisesRegex(ValueError, "different request"):
+            store.enqueue(request(), job_id, "user-b")
+        with self.assertRaises(QueueFullError):
+            store.enqueue(request(), owner_id="user-a")
+        self.assertIsNotNone(store.enqueue(request(), owner_id="user-b"))
+
     def test_capacity_and_cancellation(self):
         first = self.store.enqueue(request())
         with self.assertRaises(QueueFullError):

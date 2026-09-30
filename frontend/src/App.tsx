@@ -2,6 +2,7 @@ import { useState } from 'react';
 import GoBoard from './components/Board/GoBoard';
 import GameNavigation from './components/Controls/GameNavigation';
 import UploadPanel from './components/Controls/UploadPanel';
+import AuthPanel from './components/Controls/AuthPanel';
 import ReviewLibrary from './components/Controls/ReviewLibrary';
 import MarkupToolbar from './components/Controls/MarkupToolbar';
 import MoveTreeView from './components/Analysis/MoveTreeView';
@@ -94,6 +95,7 @@ function App() {
 
         {/* Right panel */}
         <aside className="w-full md:w-[280px] md:max-w-[280px] flex-shrink-0 flex flex-col gap-2 min-h-0 md:overflow-y-auto pb-2 md:pb-0">
+          <AuthPanel onSignOut={stopAnalysis} />
           {/* Upload */}
           <UploadPanel
             onGameLoaded={(loadedGame) => {

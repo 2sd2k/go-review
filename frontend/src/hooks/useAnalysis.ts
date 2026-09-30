@@ -14,6 +14,7 @@ import {
 import {
   clearActiveAnalysis, createAnalysisJobId, getActiveAnalysis, saveActiveAnalysis,
 } from '../lib/analysisSession';
+import { authConfigured, getAccessToken } from '../lib/auth';
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -31,13 +32,17 @@ function getWebSocketUrl(): string {
 }
 
 async function cancelJob(jobId: string): Promise<void> {
+  const token = await getAccessToken();
+  if (authConfigured && !token) throw new Error('Sign in to cancel analysis.');
   const url = new URL(getApiBaseUrl());
   url.pathname = `/api/analysis/jobs/${jobId}`;
   url.search = '';
   // Stop may race with the first WebSocket submission. Give the server a
   // moment to create the known job before treating 404 as already stopped.
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    const response = await fetch(url, { method: 'DELETE' });
+    const response = await fetch(url, {
+      method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     if (response.ok) return;
     if (response.status !== 404) throw new Error('Analysis cancellation failed');
     if (attempt < 9) await new Promise((resolve) => setTimeout(resolve, 200));
@@ -110,7 +115,7 @@ export function useAnalysis() {
     cacheKeyRef.current = cacheKey;
     saveActiveAnalysis({ cacheKey, jobId });
 
-    const request = JSON.stringify({
+    const request = {
       job_id: jobId,
       moves,
       initial_stones: initialStones,
@@ -118,7 +123,7 @@ export function useAnalysis() {
       komi: settings.komi,
       board_size: game.size,
       max_visits: settings.maxVisits,
-    });
+    };
     let retries = 0;
     const connect = () => {
       if (runId !== analysisRunRef.current) return;
@@ -126,9 +131,21 @@ export function useAnalysis() {
       wsRef.current = ws;
       let finished = false;
 
-      ws.onopen = () => {
-        if (runId !== analysisRunRef.current) return ws.close();
-        ws.send(request);
+      ws.onopen = async () => {
+        try {
+          const token = await getAccessToken();
+          if (runId !== analysisRunRef.current || ws.readyState !== WebSocket.OPEN) return ws.close();
+          if (authConfigured && !token) throw new Error('Sign in to analyze this game.');
+          ws.send(JSON.stringify({ ...request, ...(token ? { access_token: token } : {}) }));
+        } catch (error) {
+          finished = true;
+          clearActiveAnalysis(jobId);
+          jobRef.current = null;
+          cacheKeyRef.current = null;
+          setError(error instanceof Error ? error.message : 'Sign-in failed.');
+          setAnalyzing(false);
+          ws.close();
+        }
       };
 
       ws.onmessage = (event) => {
@@ -190,7 +207,7 @@ export function useAnalysis() {
     connect();
   }, [addResult, setResults, setAnalyzing, setProgress, setError, clear]);
 
-  const stopAnalysis = useCallback(() => {
+  const stopAnalysis = useCallback(async () => {
     analysisRunRef.current += 1;
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     const jobId = jobRef.current ?? getActiveAnalysis()?.jobId;
@@ -203,9 +220,11 @@ export function useAnalysis() {
     cacheKeyRef.current = null;
     if (jobId) {
       clearActiveAnalysis(jobId);
-      void cancelJob(jobId).catch(() => setError('Could not cancel analysis on the server.'));
     }
     setAnalyzing(false);
+    if (jobId) {
+      await cancelJob(jobId).catch(() => setError('Could not cancel analysis on the server.'));
+    }
   }, [setAnalyzing, setError]);
 
   return { analyzeGame, stopAnalysis };

@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Tuple
 
 from app.services.interactive_analysis import request_candidate_analysis
-from app.services.coach_limits import CoachLimiter
+from app.services.auth import authenticate_http
+from app.services.coach_limits import CoachLimiter, RepeatMeter
+from app.services.shared_quotas import get_shared_coach_quota
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ coach_limiter = CoachLimiter(
     max_in_flight=int(os.getenv('COACH_MAX_IN_FLIGHT', '2')),
 )
 _fingerprint_key = secrets.token_bytes(32)
+repeat_meter = RepeatMeter()
 
 
 class Candidate(BaseModel):
@@ -328,6 +331,7 @@ async def generate_answer(request: CoachRequest, api_key: str, model: str,
 
 @router.post('/api/coach')
 async def ask_coach(request: CoachRequest, http_request: FastAPIRequest):
+    user_id = await authenticate_http(http_request)
     position = request.position
     if len(position.board_rows) != position.board_size or any(
         len(row) != position.board_size or re.search('[^BW.]', row)
@@ -360,9 +364,15 @@ async def ask_coach(request: CoachRequest, http_request: FastAPIRequest):
     if len(request_bytes) > MAX_REQUEST_BYTES:
         raise HTTPException(413, 'This coach question contains too much game context.')
     fingerprint = hmac.digest(_fingerprint_key, request_bytes, hashlib.sha256)
-    # Use the connection address, never an untrusted X-Forwarded-For header.
-    client = http_request.client.host if http_request.client else 'unknown'
-    repeated = coach_limiter.acquire(client, fingerprint)
+    lease_id = None
+    if user_id:
+        quota = get_shared_coach_quota()
+        lease_id = await asyncio.to_thread(quota.acquire, user_id)
+        repeated = repeat_meter.observe(fingerprint)
+    else:
+        # Local prototype fallback; never trust an X-Forwarded-For header.
+        client = http_request.client.host if http_request.client else 'unknown'
+        repeated = coach_limiter.acquire(client, fingerprint)
     started = time.monotonic()
     completed = False
     model = os.environ.get('OPENAI_COACH_MODEL', 'gpt-5-mini')
@@ -372,7 +382,10 @@ async def ask_coach(request: CoachRequest, http_request: FastAPIRequest):
         return {'teaching_explanation': teaching, 'uncertainty': uncertainty,
                 'engine_facts': facts + extra_facts}
     finally:
-        coach_limiter.release()
+        if lease_id:
+            await asyncio.to_thread(quota.release, lease_id)
+        else:
+            coach_limiter.release()
         logger.info('coach_request %s', json.dumps({
             'status': 'ok' if completed else 'failed',
             'exact_repeat': repeated,

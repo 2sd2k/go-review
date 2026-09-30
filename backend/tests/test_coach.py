@@ -51,6 +51,19 @@ def example_request(question='Why was this move bad?', with_context=False):
 
 
 class CoachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authenticated_coach_uses_shared_user_quota(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "secret"}), \
+                patch("app.routers.coach.authenticate_http", return_value="user-a"), \
+                patch("app.routers.coach.get_shared_coach_quota") as quota_factory, \
+                patch("app.routers.coach.generate_answer", return_value=("Play C4.", "It depends.", [])), \
+                patch("app.routers.coach.coach_limiter") as local_limit:
+            quota_factory.return_value.acquire.return_value = "lease-a"
+            answer = await ask(example_request())
+        self.assertEqual(answer["teaching_explanation"], "Play C4.")
+        quota_factory.return_value.acquire.assert_called_once_with("user-a")
+        quota_factory.return_value.release.assert_called_once_with("lease-a")
+        local_limit.acquire.assert_not_called()
+
     async def test_unknown_candidate_does_not_call_model(self):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret'}), patch('app.routers.coach.generate_answer') as generate:
             answer = await ask(example_request('Why not C3?'))

@@ -108,6 +108,11 @@ without claiming that KataGo itself speaks natural language.
 4. Add authentication and shared per-user quotas (replacing prototype IP limits),
    structured logs, metrics, error reporting,
    health/readiness checks, and abuse controls.
+   Backend and frontend Supabase email-link integration, per-user SQLite quotas,
+   job ownership, request IDs, route metrics, and readiness checks are built.
+   Keep this open until a real Supabase project is configured and the flow is
+   verified end-to-end; hosted error reporting and multi-host quota storage
+   remain future deployment work.
 5. Pin a supported Python version, then upgrade and lock backend dependencies
    with hashes. The current local Python 3.9 runtime is too old for several
    current package releases.

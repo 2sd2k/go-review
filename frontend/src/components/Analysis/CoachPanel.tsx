@@ -4,6 +4,7 @@ import { useAnalysisStore } from '../../stores/analysisStore';
 import { buildCoachEvidence, buildCoachGameContext } from '../../lib/coachEvidence';
 import type { AnalysisSettings, MoveAnalysis } from '../../types/analysis';
 import type { Game } from '../../types/game';
+import { authConfigured, getAccessToken } from '../../lib/auth';
 
 interface Turn {
   question: string;
@@ -110,9 +111,11 @@ function CoachConversation({ game, nodeId, position, settings, turns, onTurn }: 
       { role: 'assistant', content: turn.answer },
     ]);
     try {
+      const token = await getAccessToken();
+      if (authConfigured && !token) throw new Error('Sign in to ask the coach.');
       const response = await fetch(coachUrl(), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ question: trimmed, position, history, mode, level,
           game_context: buildCoachGameContext(game, nodeId, settings) }),
         signal: controller.signal,

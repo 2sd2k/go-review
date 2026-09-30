@@ -79,3 +79,25 @@ class CoachLimiter:
     @staticmethod
     def _reject(message: str, retry_seconds: float) -> None:
         raise HTTPException(429, message, headers={'Retry-After': str(max(1, math.ceil(retry_seconds)))})
+
+
+class RepeatMeter:
+    """Bounded, process-local exact-repeat signal; never stores question text."""
+
+    def __init__(self, capacity: int = 256, window_seconds: int = 3600):
+        self.capacity = capacity
+        self.window_seconds = window_seconds
+        self._lock = threading.Lock()
+        self._seen: OrderedDict[bytes, float] = OrderedDict()
+
+    def observe(self, fingerprint: bytes) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            while self._seen and next(iter(self._seen.values())) <= now - self.window_seconds:
+                self._seen.popitem(last=False)
+            repeated = fingerprint in self._seen
+            self._seen.pop(fingerprint, None)
+            self._seen[fingerprint] = now
+            if len(self._seen) > self.capacity:
+                self._seen.popitem(last=False)
+            return repeated

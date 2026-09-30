@@ -3,21 +3,24 @@ import json
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request as FastAPIRequest, WebSocket, WebSocketDisconnect
 
 from app.models.schemas import AnalysisRequest
+from app.services.auth import authenticate_http, authenticate_token
 from app.services.analysis_jobs import QueueFullError, get_job_store
 from app.config import CORS_ORIGINS
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+MAX_ANALYSIS_REQUEST_BYTES = 256_000
 
 
 @router.delete("/api/analysis/jobs/{job_id}", status_code=204)
-async def cancel_analysis(job_id: str):
+async def cancel_analysis(job_id: str, request: FastAPIRequest):
+    user_id = await authenticate_http(request)
     store = get_job_store()
     job = await asyncio.to_thread(store.get_job, job_id)
-    if job is None or job["kind"] != "game":
+    if job is None or job["kind"] != "game" or job["owner_id"] != user_id:
         raise HTTPException(status_code=404, detail="Analysis job not found")
     await asyncio.to_thread(store.cancel, job_id)
 
@@ -39,8 +42,12 @@ async def analyze_game(ws: WebSocket):
     store = get_job_store()
 
     try:
-        raw = await ws.receive_text()
+        raw = await asyncio.wait_for(ws.receive_text(), timeout=10)
+        if len(raw.encode("utf-8")) > MAX_ANALYSIS_REQUEST_BYTES:
+            await ws.send_text(json.dumps({"type": "error", "error": "Analysis request is too large."}))
+            return
         message = json.loads(raw)
+        user_id = await authenticate_token(message.get("access_token"))
         if message.get("action") == "resume":
             job_id = message.get("job_id")
             if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
@@ -50,7 +57,7 @@ async def analyze_game(ws: WebSocket):
                 }))
                 return
             job = await asyncio.to_thread(store.get_job, job_id)
-            if job is None or job["kind"] != "game":
+            if job is None or job["kind"] != "game" or job["owner_id"] != user_id:
                 await ws.send_text(json.dumps({
                     "type": "error", "error": "Analysis job expired or was not found.",
                 }))
@@ -70,7 +77,7 @@ async def analyze_game(ws: WebSocket):
                     "error": "Analysis worker is offline. Start it with python -m app.worker.",
                 }))
                 return
-            job_id = await asyncio.to_thread(store.enqueue, request, requested_id)
+            job_id = await asyncio.to_thread(store.enqueue, request, requested_id, user_id)
             created_new_job = existing is None
             server_generated_id = requested_id is None
             job = await asyncio.to_thread(store.get_job, job_id)
@@ -110,6 +117,10 @@ async def analyze_game(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("Client disconnected during analysis")
+    except asyncio.TimeoutError:
+        await ws.close(code=1008, reason="Analysis request timed out")
+    except HTTPException as error:
+        await ws.send_text(json.dumps({"type": "error", "error": error.detail}))
     except QueueFullError as error:
         await ws.send_text(json.dumps({"type": "error", "error": str(error)}))
     except Exception as e:
