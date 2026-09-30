@@ -53,8 +53,12 @@ The API and worker must share `ANALYSIS_JOB_DB` (defaults to
 `backend/analysis_jobs.sqlite3`). This SQLite queue supports separate processes
 on one host; it is not a multi-host job broker. The API reports worker
 availability at `/api/health` and refuses new analyses while no worker is
-online. Closing the analysis connection cancels its queued job. A worker
-also cancels in-flight work and asks KataGo to terminate its unfinished
+online. Analysis progress and results are persisted as events. If the
+WebSocket drops, the browser reconnects and replays saved results rather than
+starting another review. If it cannot reconnect automatically, click
+**Analyze Game** again; reopening the same game in the same browser tab can
+also rejoin its session-stored job. The **Stop Analysis** button explicitly
+cancels queued or in-flight work and asks KataGo to terminate unfinished
 queries without restarting the engine. Game jobs are capped at 1,000 visits
 per position, 500,000 total visits, and 20 minutes; focused coach searches
 are capped at 200 visits and 45 seconds. Queued game records and engine

@@ -78,21 +78,27 @@ class AnalysisJobStore:
         finally:
             db.close()
 
-    def enqueue(self, request: AnalysisRequest) -> str:
+    def enqueue(self, request: AnalysisRequest, job_id: str | None = None) -> str:
         now = time.time()
-        job_id = uuid4().hex
+        job_id = job_id or uuid4().hex
+        request_json = request.model_dump_json()
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             self._expire_stale_running(db, now)
             # Finished jobs are kept briefly for diagnostics, then reclaimed.
             db.execute("DELETE FROM jobs WHERE state IN ('complete', 'error', 'cancelled') AND updated_at < ?",
                        (now - 86_400,))
+            existing = db.execute("SELECT kind, request_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if existing:
+                if existing["kind"] != "game" or existing["request_json"] != request_json:
+                    raise ValueError("Analysis job ID belongs to a different request")
+                return job_id
             active = db.execute("SELECT count(*) FROM jobs WHERE kind='game' AND state IN ('queued', 'running')").fetchone()[0]
             if active >= self.max_active:
                 raise QueueFullError("Analysis queue is full. Please try again later.")
             db.execute("""INSERT INTO jobs(id, request_json, state, total_moves, created_at, updated_at)
                           VALUES (?, ?, 'queued', ?, ?, ?)""",
-                       (job_id, request.model_dump_json(), len(request.moves), now, now))
+                       (job_id, request_json, len(request.moves), now, now))
         return job_id
 
     def enqueue_candidate(self, request: CandidateAnalysisRequest) -> str:

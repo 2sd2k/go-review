@@ -45,6 +45,15 @@ class JobStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.claim("worker-b"))
         self.assertEqual(self.store.get_job(job_id)["state"], "running")
 
+    def test_repeated_client_job_id_rejoins_without_duplicate_work(self):
+        job_id = "a" * 32
+        self.assertEqual(self.store.enqueue(request(), job_id), job_id)
+        self.assertEqual(self.store.enqueue(request(), job_id), job_id)
+        with self.assertRaisesRegex(ValueError, "different request"):
+            self.store.enqueue(AnalysisRequest(moves=[], board_size=9), job_id)
+        with self.store._connection() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0], 1)
+
     def test_capacity_and_cancellation(self):
         first = self.store.enqueue(request())
         with self.assertRaises(QueueFullError):

@@ -102,8 +102,9 @@ without claiming that KataGo itself speaks natural language.
    interactive queries, and terminate engine work on cancellation. Focused
    coach searches now share the worker queue and get higher KataGo priority;
    cancelled searches no longer restart the shared engine.
-3. Stream job events over WebSocket or server-sent events and persist partial
-   progress so reconnects work.
+3. [x] Stream job events over WebSocket and persist partial progress so
+   reconnects work. Rejoining a job replays its saved events; a disconnected
+   socket no longer cancels the job, while Stop explicitly does.
 4. Add authentication and shared per-user quotas (replacing prototype IP limits),
    structured logs, metrics, error reporting,
    health/readiness checks, and abuse controls.

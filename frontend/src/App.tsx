@@ -120,6 +120,7 @@ function App() {
             hasGame={Boolean(game)}
             onChange={updateSettings}
             onCreateBoard={() => {
+              stopAnalysis();
               clearAnalysis();
               loadGame(createEmptyGame(settings.boardSize));
             }}

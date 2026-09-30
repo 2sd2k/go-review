@@ -5,9 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.models.schemas import MoveAnalysis
+from fastapi import WebSocketDisconnect
+
+from app.models.schemas import AnalysisRequest, MoveAnalysis
 from app.config import DEFAULT_DEV_ORIGINS
-from app.routers.analysis import analyze_game
+from app.routers.analysis import analyze_game, cancel_analysis
 from app.services.analysis_jobs import AnalysisJobStore
 from app.worker import process_one_job
 
@@ -15,20 +17,22 @@ from app.worker import process_one_job
 class FakeWebSocket:
     headers = {}
 
-    def __init__(self):
+    def __init__(self, initial_message=None):
         self.sent = []
         self.disconnected = asyncio.Event()
         self.closed_code = None
+        self.initial_message = initial_message or {"moves": [["B", "D4"]], "board_size": 9}
+        self.followup_message = {"type": "websocket.disconnect"}
 
     async def accept(self):
         pass
 
     async def receive_text(self):
-        return json.dumps({"moves": [["B", "D4"]], "board_size": 9})
+        return json.dumps(self.initial_message)
 
     async def receive(self):
         await self.disconnected.wait()
-        return {"type": "websocket.disconnect"}
+        return self.followup_message
 
     async def send_text(self, text):
         self.sent.append(json.loads(text))
@@ -84,7 +88,7 @@ class AnalysisRouterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ws.sent[0]["type"], "error")
             self.assertIn("python -m app.worker", ws.sent[0]["error"])
 
-    async def test_disconnect_cancels_queued_job(self):
+    async def test_disconnect_preserves_job_and_resume_replays_results(self):
         with tempfile.TemporaryDirectory() as directory:
             store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")
             store.heartbeat("busy-worker")
@@ -98,7 +102,61 @@ class AnalysisRouterTests(unittest.IsolatedAsyncioTestCase):
                 job_id = ws.sent[0]["job_id"]
                 ws.disconnected.set()
                 await asyncio.wait_for(relay, timeout=2)
+            self.assertEqual(store.get_job(job_id)["state"], "queued")
+            await process_one_job(store, "worker-a", FakeEngine())
+            resume = FakeWebSocket({"action": "resume", "job_id": job_id})
+            with patch("app.routers.analysis.get_job_store", return_value=store):
+                await asyncio.wait_for(analyze_game(resume), timeout=2)
+            self.assertEqual([message["type"] for message in resume.sent],
+                             ["progress", "result", "result", "complete"])
+            self.assertEqual(resume.sent[0]["job_id"], job_id)
+
+    async def test_explicit_cancel_stops_reconnectable_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")
+            job_id = store.enqueue(AnalysisRequest(moves=[], board_size=9))
+            with patch("app.routers.analysis.get_job_store", return_value=store):
+                await cancel_analysis(job_id)
             self.assertEqual(store.get_job(job_id)["state"], "cancelled")
+
+    async def test_resume_replays_partial_progress_and_socket_cancel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")
+            job_id = store.enqueue(AnalysisRequest(moves=[["B", "D4"]], board_size=9))
+            store.claim("worker-a", "game")
+            store.add_result(job_id, "worker-a", MoveAnalysis(
+                move_number=0, current_player="B", win_rate=0.5,
+                score_lead=0, top_moves=[], ownership=[]))
+            ws = FakeWebSocket({"action": "resume", "job_id": job_id})
+            ws.followup_message = {"type": "websocket.receive", "text": json.dumps({
+                "action": "cancel", "job_id": job_id,
+            })}
+            with patch("app.routers.analysis.get_job_store", return_value=store):
+                relay = asyncio.create_task(analyze_game(ws))
+                for _ in range(100):
+                    if len(ws.sent) >= 2:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual([item["type"] for item in ws.sent], ["progress", "result"])
+                self.assertEqual(ws.sent[0]["move_number"], 0)
+                ws.disconnected.set()
+                await asyncio.wait_for(relay, timeout=2)
+            self.assertEqual(store.get_job(job_id)["state"], "cancelled")
+
+    async def test_client_id_survives_lost_initial_ack(self):
+        class LostAckWebSocket(FakeWebSocket):
+            async def send_text(self, text):
+                raise WebSocketDisconnect()
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = AnalysisJobStore(Path(directory) / "jobs.sqlite3")
+            store.heartbeat("worker-a")
+            job_id = "c" * 32
+            ws = LostAckWebSocket({"job_id": job_id, "moves": [["B", "D4"]], "board_size": 9})
+            with patch("app.routers.analysis.get_job_store", return_value=store):
+                await analyze_game(ws)
+            self.assertEqual(store.get_job(job_id)["state"], "queued")
+            self.assertEqual(store.enqueue(AnalysisRequest(moves=[["B", "D4"]], board_size=9), job_id), job_id)
 
 
 if __name__ == "__main__":
