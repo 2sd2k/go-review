@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import GoBoard from './components/Board/GoBoard';
 import GameNavigation from './components/Controls/GameNavigation';
 import UploadPanel from './components/Controls/UploadPanel';
@@ -6,7 +6,6 @@ import AuthPanel from './components/Controls/AuthPanel';
 import ReviewLibrary from './components/Controls/ReviewLibrary';
 import MarkupToolbar from './components/Controls/MarkupToolbar';
 import MoveTreeView from './components/Analysis/MoveTreeView';
-import WinRateGraph from './components/Analysis/WinRateGraph';
 import ScoreBar from './components/Analysis/ScoreBar';
 import MoveCommentary from './components/Analysis/MoveCommentary';
 import ReviewSummary from './components/Analysis/ReviewSummary';
@@ -23,6 +22,8 @@ import { createEmptyGame } from './types/game';
 import { DEFAULT_ANALYSIS_SETTINGS, type AnalysisSettings } from './types/analysis';
 import { normalizeRules } from './lib/gobanRules';
 import { trunkLine } from './lib/moveTree';
+
+const WinRateGraph = lazy(() => import('./components/Analysis/WinRateGraph'));
 
 function App() {
   useKeyboardNav();
@@ -172,7 +173,9 @@ function App() {
           {/* Win rate graph */}
           {hasAnalysis && (
             <div className="bg-gray-800/50 rounded-lg p-2 border border-gray-700">
-              <WinRateGraph />
+              <Suspense fallback={<p className="text-xs text-gray-400">Loading graph…</p>}>
+                <WinRateGraph />
+              </Suspense>
             </div>
           )}
 

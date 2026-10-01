@@ -3,7 +3,6 @@ import { useAnalysisStore } from '../stores/analysisStore';
 import type { Game } from '../types/game';
 import type { AnalysisSettings } from '../types/analysis';
 import { pointToDisplay } from '../lib/coordinates';
-import { exportSgf } from '../lib/sgf';
 import {
   getCachedAnalysis,
   hashText,
@@ -66,7 +65,17 @@ export function useAnalysis() {
     setAnalyzing(true);
     setError(null);
 
-    const sgfHash = await hashText(exportSgf(game));
+    let sgfHash: string;
+    try {
+      const { exportSgf } = await import('../lib/sgf');
+      sgfHash = await hashText(exportSgf(game));
+    } catch {
+      if (runId === analysisRunRef.current) {
+        setError('Could not prepare this game for analysis.');
+        setAnalyzing(false);
+      }
+      return;
+    }
     if (runId !== analysisRunRef.current) return;
     const cacheIdentity = {
       sgfHash,

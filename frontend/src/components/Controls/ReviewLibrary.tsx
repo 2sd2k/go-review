@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { exportSgf, parseSgf } from '../../lib/sgf';
 import { hashText } from '../../lib/analysisCache';
 import {
   deleteReview, listReviews, renameReview, resolveSelectedPath, saveReview,
@@ -37,24 +36,34 @@ export default function ReviewLibrary({ settings, onRestore }: {
   useEffect(() => {
     if (!game?.localReviewId || analyzing) return;
     const id = game.localReviewId;
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      const snapshot = {
-        editedSgf: exportSgf(game),
-        settings,
-        results: Array.from(results.entries()),
-        selectedPath: selectedPath(game, currentNodeId),
-      };
-      void updateReview(id, snapshot).then(existing => {
-        if (existing) void listReviews().then(setReviews);
-      }).catch(error => setMessage(error instanceof Error ? error.message : 'Autosave failed.'));
+      void (async () => {
+        const { exportSgf } = await import('../../lib/sgf');
+        if (cancelled) return;
+        const snapshot = {
+          editedSgf: exportSgf(game),
+          settings,
+          results: Array.from(results.entries()),
+          selectedPath: selectedPath(game, currentNodeId),
+        };
+        const existing = await updateReview(id, snapshot);
+        if (existing && !cancelled) {
+          const items = await listReviews();
+          if (!cancelled) setReviews(items);
+        }
+      })().catch(error => {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : 'Autosave failed.');
+      });
     }, 600);
-    return () => window.clearTimeout(timer);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [game, currentNodeId, results, settings, analyzing]);
 
   const save = async () => {
     if (!game || busy || analyzing) return;
     setBusy(true);
     try {
+      const { exportSgf } = await import('../../lib/sgf');
       const editedSgf = exportSgf(game);
       const originalSgf = game.originalSgf ?? editedSgf;
       const id = game.localReviewId ?? (game.originalSgf
@@ -76,8 +85,10 @@ export default function ReviewLibrary({ settings, onRestore }: {
     finally { setBusy(false); }
   };
 
-  const restore = (review: SavedReview) => {
+  const restore = async (review: SavedReview) => {
+    setBusy(true);
     try {
+      const { parseSgf } = await import('../../lib/sgf');
       const restored = parseSgf(review.editedSgf);
       restored.originalSgf = review.originalSgf;
       restored.localReviewId = review.id;
@@ -91,6 +102,7 @@ export default function ReviewLibrary({ settings, onRestore }: {
       analysis.setProgress(last, last);
       setMessage('Saved review opened.');
     } catch { setMessage('This saved game could not be opened.'); }
+    finally { setBusy(false); }
   };
 
   const rename = async (review: SavedReview) => {
@@ -141,7 +153,7 @@ export default function ReviewLibrary({ settings, onRestore }: {
             </form>
           ) : (
             <>
-              <button type="button" disabled={busy || analyzing} onClick={() => restore(review)}
+              <button type="button" disabled={busy || analyzing} onClick={() => void restore(review)}
                 className="text-left w-full rounded bg-gray-700 p-2 text-xs disabled:opacity-50">
                 {review.title}<br />
                 <span>{new Date(review.savedAt).toLocaleString()} · {review.results.length} analyzed positions</span>

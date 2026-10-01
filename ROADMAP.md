@@ -113,11 +113,14 @@ without claiming that KataGo itself speaks natural language.
    Keep this open until a real Supabase project is configured and the flow is
    verified end-to-end; hosted error reporting and multi-host quota storage
    remain future deployment work.
-5. Pin a supported Python version, then upgrade and lock backend dependencies
-   with hashes. The current local Python 3.9 runtime is too old for several
-   current package releases.
-6. Split the frontend bundle and keep optional SGF encoding support out of the
-   initial browser chunk.
+5. [x] Pin Python 3.13, upgrade backend dependencies, and lock the full
+   cross-platform dependency set with hashes. CI installs from the lock with
+   hash verification. Local Python 3.9 environments need a new 3.13 venv.
+6. [x] Split the frontend bundle: load SGF parsing/export (including its
+   optional encoding support) only when needed, and load the win-rate graph
+   only after analysis exists. The initial JavaScript chunk fell from about
+   1.54 MB to 596 KB before compression; further board-engine splitting can
+   be considered if startup measurements justify it.
 
 ## Near-term technical backlog
 

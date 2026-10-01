@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
 import { useGameStore } from '../../stores/gameStore';
-import { exportSgf, parseSgf } from '../../lib/sgf';
 import { useAnalysisStore } from '../../stores/analysisStore';
 import type { Game } from '../../types/game';
 import { fetchOgsSgf } from '../../lib/ogs';
@@ -20,7 +19,9 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
   const [isImportingOgs, setIsImportingOgs] = useState(false);
 
   const handleSgf = useCallback(
-    (text: string) => {
+    async (text: string, run: number) => {
+      const { parseSgf } = await import('../../lib/sgf');
+      if (run !== importRun.current) return;
       const parsed = parseSgf(text);
       parsed.originalSgf = text;
       clearAnalysis();
@@ -40,11 +41,11 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
         return;
       }
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         if (run !== importRun.current) return;
         try {
           const text = e.target?.result as string;
-          handleSgf(text);
+          await handleSgf(text, run);
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to parse SGF file');
         }
@@ -62,7 +63,8 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
     try {
       const sgf = await fetchOgsSgf(ogsInput);
       if (run !== importRun.current) return;
-      handleSgf(sgf);
+      await handleSgf(sgf, run);
+      if (run !== importRun.current) return;
       setOgsInput('');
     } catch (err) {
       if (run !== importRun.current) return;
@@ -164,13 +166,15 @@ export default function UploadPanel({ onGameLoaded }: UploadPanelProps) {
         <button
           type="button"
           onClick={() => {
-            const blob = new Blob([exportSgf(game)], { type: 'application/x-go-sgf' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = 'game.sgf';
-            link.click();
-            URL.revokeObjectURL(url);
+            void import('../../lib/sgf').then(({ exportSgf }) => {
+              const blob = new Blob([exportSgf(game)], { type: 'application/x-go-sgf' });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = 'game.sgf';
+              link.click();
+              URL.revokeObjectURL(url);
+            }).catch(() => setError('Could not prepare SGF download.'));
           }}
           className="mt-1 w-full px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
         >
