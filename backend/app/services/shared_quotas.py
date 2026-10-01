@@ -6,6 +6,7 @@ import math
 import os
 import sqlite3
 import time
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
@@ -43,8 +44,14 @@ class SharedCoachQuota:
                     ON coach_quota_requests(created_at);
             """)
 
+    @contextmanager
     def _connection(self):
-        return sqlite3.connect(self.path, timeout=5)
+        db = sqlite3.connect(self.path, timeout=5)
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def acquire(self, user_id: str) -> str:
         now = self.clock()

@@ -1,7 +1,8 @@
+import asyncio
+import sqlite3
 import tempfile
 import unittest
-import sqlite3
-import asyncio
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -112,11 +113,12 @@ class JobStoreTests(unittest.TestCase):
 
     def test_existing_database_is_upgraded_in_place(self):
         old_path = Path(self.temp.name) / "old.sqlite3"
-        with sqlite3.connect(old_path) as db:
-            db.execute("""CREATE TABLE jobs (id TEXT PRIMARY KEY, request_json TEXT NOT NULL,
-                        state TEXT NOT NULL, total_moves INTEGER NOT NULL,
-                        completed_count INTEGER NOT NULL DEFAULT 0, worker_id TEXT,
-                        error TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL)""")
+        with closing(sqlite3.connect(old_path)) as db:
+            with db:
+                db.execute("""CREATE TABLE jobs (id TEXT PRIMARY KEY, request_json TEXT NOT NULL,
+                            state TEXT NOT NULL, total_moves INTEGER NOT NULL,
+                            completed_count INTEGER NOT NULL DEFAULT 0, worker_id TEXT,
+                            error TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL)""")
         upgraded = AnalysisJobStore(old_path)
         self.assertEqual(upgraded.get_job(upgraded.enqueue_candidate(candidate_request()))["kind"], "candidate")
 

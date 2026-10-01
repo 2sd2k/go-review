@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+backend/.venv313/
 backend/analysis_logs/
 backend/analysis_jobs.sqlite3*
 

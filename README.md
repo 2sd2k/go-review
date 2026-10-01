@@ -16,13 +16,16 @@ coach.
 ## Run locally
 
 Set `KATAGO_BINARY`, `KATAGO_MODEL`, and `KATAGO_CONFIG` if KataGo is not
-installed in the Homebrew locations currently used as defaults.
+installed in the Homebrew locations currently used as defaults. Use Python
+3.13 for the backend (see `backend/.python-version`). The commands below use
+[`uv`](https://docs.astral.sh/uv/) and a separate `.venv313`, so an existing
+Python 3.9 `.venv` stays untouched.
 
 ```sh
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv venv --python 3.13 .venv313
+source .venv313/bin/activate
+uv pip sync requirements.txt --require-hashes --python .venv313/bin/python
 uvicorn app.main:app --reload
 ```
 
@@ -69,6 +72,13 @@ suitable for shared hosting without additional controls. Restart both the
 API and worker after changing backend code if they are not running with reload.
 
 See [ROADMAP.md](./ROADMAP.md) for the recommended build sequence.
+
+Backend direct dependencies are declared in `backend/requirements.in`; the
+universal, hash-locked `backend/requirements.txt` is generated with
+`uv pip compile requirements.in --python-version 3.13 --universal --generate-hashes --output-file requirements.txt`
+from `backend/` (add `--upgrade` when updating the entire lock). Recompile
+deliberately when upgrading packages, then rerun the backend tests under
+Python 3.13.
 
 ## Managed sign-in and operations
 
