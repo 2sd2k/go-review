@@ -124,12 +124,14 @@ without claiming that KataGo itself speaks natural language.
 
 ## Near-term technical backlog
 
-- Add timeouts and engine-death propagation for every pending KataGo request.
+- [x] Give every pending KataGo query a submission-time deadline, reject all
+  pending requests on engine exit, and bound game-query pipe writes. Wait for
+  final (not intermediate) protocol responses and reject `noResults`.
 - [x] Send KataGo termination requests when a WebSocket client cancels.
 - [x] Consume and retain bounded KataGo stderr output for diagnostics.
 - Use engine-returned turn numbers and complete results in arrival order.
 - Avoid retaining ownership arrays for every move unless the UI needs them.
-- Add CI for frontend lint/build, backend tests, and one mocked engine protocol
-  test; keep the real-model smoke test optional because it is hardware-specific.
-  Frontend/backend CI added; a subprocess protocol test remains pending.
+- [x] Run frontend lint/build, backend tests, and mocked subprocess protocol
+  tests in CI. Keep the real-model smoke test optional because it is
+  hardware-specific.
 - [x] Initialize this folder as its own Git repository and connect it to GitHub.

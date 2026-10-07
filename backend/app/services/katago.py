@@ -25,10 +25,12 @@ class KataGoEngine:
     def __init__(self):
         self._process: asyncio.subprocess.Process | None = None
         self._pending: dict[str, asyncio.Future] = {}
+        self._pending_deadlines: dict[str, asyncio.TimerHandle] = {}
         self._reader_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
         self.stderr_tail = deque(maxlen=64)
         self.query_timeout = 120.0
+        self.game_query_timeout = 20 * 60.0
         self._lock = asyncio.Lock()
 
     @property
@@ -104,10 +106,36 @@ class KataGoEngine:
         self._process = None
 
         # Cancel all pending futures
-        for future in self._pending.values():
+        for query_id in list(self._pending):
+            future = self._drop_pending(query_id)
             if not future.done():
                 future.set_exception(RuntimeError("KataGo stopped"))
-        self._pending.clear()
+
+    def _register_pending(self, query_id: str, terminate_on_timeout: bool = True,
+                          timeout: float | None = None) -> asyncio.Future:
+        if query_id in self._pending:
+            raise ValueError(f"Duplicate KataGo query id: {query_id}")
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._pending[query_id] = future
+        self._pending_deadlines[query_id] = loop.call_later(
+            self.query_timeout if timeout is None else timeout,
+            self._expire_pending, query_id, terminate_on_timeout,
+        )
+        return future
+
+    def _drop_pending(self, query_id: str) -> asyncio.Future | None:
+        deadline = self._pending_deadlines.pop(query_id, None)
+        if deadline is not None:
+            deadline.cancel()
+        return self._pending.pop(query_id, None)
+
+    def _expire_pending(self, query_id: str, terminate_on_timeout: bool) -> None:
+        future = self._drop_pending(query_id)
+        if future is not None and not future.done():
+            future.set_exception(asyncio.TimeoutError(f"KataGo query {query_id} timed out"))
+            if terminate_on_timeout:
+                asyncio.create_task(self._terminate_queries([query_id]))
 
     async def _read_stderr(self):
         """Drain diagnostics in bounded chunks, including output without newlines."""
@@ -122,9 +150,11 @@ class KataGoEngine:
 
     async def _read_responses(self):
         """Background task that reads KataGo stdout and resolves pending queries."""
+        process = self._process
+        reader_error = None
         try:
-            while self._process and self._process.stdout:
-                line = await self._process.stdout.readline()
+            while process and process.stdout:
+                line = await process.stdout.readline()
                 if not line:
                     break
 
@@ -133,23 +163,32 @@ class KataGoEngine:
                 except json.JSONDecodeError:
                     continue
 
+                if "error" in response and not response.get("id"):
+                    raise RuntimeError(str(response["error"]))
+                if "warning" in response:
+                    logger.warning("KataGo returned a query warning")
+                    continue
                 query_id = response.get("id")
-                if query_id and query_id in self._pending:
-                    future = self._pending.pop(query_id)
-                    if not future.done():
-                        if "error" in response:
-                            future.set_exception(RuntimeError(response["error"]))
-                        else:
-                            future.set_result(response)
+                if not query_id or response.get("isDuringSearch") is True:
+                    continue
+                future = self._drop_pending(query_id)
+                if future is not None and not future.done():
+                    if "error" in response:
+                        future.set_exception(RuntimeError(str(response["error"])))
+                    elif response.get("noResults"):
+                        future.set_exception(RuntimeError("KataGo returned no analysis results"))
+                    else:
+                        future.set_result(response)
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"KataGo reader error: {e}")
+            reader_error = RuntimeError(f"KataGo reader error: {e}")
+            logger.error("KataGo reader error: %s", e)
         finally:
-            for future in self._pending.values():
+            for query_id in list(self._pending):
+                future = self._drop_pending(query_id)
                 if not future.done():
-                    future.set_exception(RuntimeError("KataGo stopped responding"))
-            self._pending.clear()
+                    future.set_exception(reader_error or RuntimeError("KataGo stopped responding"))
 
     async def _send_query(self, query: dict) -> dict:
         """Send a query to KataGo and wait for the response."""
@@ -157,25 +196,24 @@ class KataGoEngine:
             await self.start()
 
         query_id = query["id"]
-        if query_id in self._pending:
-            raise ValueError(f"Duplicate KataGo query id: {query_id}")
-        future = asyncio.get_event_loop().create_future()
-        self._pending[query_id] = future
+        future = self._register_pending(query_id, terminate_on_timeout=False)
 
         query_json = json.dumps(query) + "\n"
         completed = False
         try:
             self._process.stdin.write(query_json.encode())
             await asyncio.wait_for(self._process.stdin.drain(), self.query_timeout)
-            response = await asyncio.wait_for(future, self.query_timeout)
+            response = await future
             completed = True
             return response
         finally:
             if not completed:
                 await self._terminate_queries([query_id])
-            self._pending.pop(query_id, None)
+            self._drop_pending(query_id)
             if not future.done():
                 future.cancel()
+            elif not future.cancelled():
+                future.exception()
 
     async def _terminate_queries(self, query_ids: list[str]) -> None:
         """Ask KataGo to stop exact pending searches without restarting the engine."""
@@ -284,18 +322,19 @@ class KataGoEngine:
                     "priority": 0,
                     "includeOwnership": True,
                 }
-                future = asyncio.get_event_loop().create_future()
-                self._pending[query_id] = future
+                # A batched game may queue many positions. Their deadline follows
+                # the full job budget, not the focused-query timeout.
+                future = self._register_pending(query_id, timeout=self.game_query_timeout)
                 futures.append((turn, future))
                 self._process.stdin.write((json.dumps(query) + "\n").encode())
 
-            await self._process.stdin.drain()
+            await asyncio.wait_for(self._process.stdin.drain(), self.query_timeout)
 
             # Comparisons for a played move depend on its preceding position,
             # so process turns in order even if KataGo answers out of order.
             for turn, future in futures:
                 try:
-                    response = await asyncio.wait_for(future, self.query_timeout)
+                    response = await future
                     analysis = parse_katago_response(response, turn)
                     comparison = comparisons.get(turn)
                     if comparison:
@@ -324,7 +363,7 @@ class KataGoEngine:
                     logger.error("Error analyzing turn %s: %s", turn, error)
                     raise
                 finally:
-                    self._pending.pop(f"{game_id}_t{turn}", None)
+                    self._drop_pending(f"{game_id}_t{turn}")
             completed_all = True
         finally:
             # Also run when a worker closes this generator after cancellation.
@@ -333,7 +372,7 @@ class KataGoEngine:
                     f"{game_id}_t{turn}" for turn, future in futures if not future.done()
                 ])
             for pending_turn, pending_future in futures:
-                self._pending.pop(f"{game_id}_t{pending_turn}", None)
+                self._drop_pending(f"{game_id}_t{pending_turn}")
                 if not pending_future.done():
                     pending_future.cancel()
                 elif not pending_future.cancelled():

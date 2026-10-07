@@ -169,5 +169,10 @@ npm run lint
 npm run build
 
 cd ../backend
-python3 -m unittest discover -s tests -v
+source .venv313/bin/activate
+python -m unittest discover -s tests -v
 ```
+
+The backend suite includes a fake KataGo subprocess, so these protocol tests
+do not need a GPU or downloaded model. A real KataGo smoke test is still
+optional and hardware-specific.
