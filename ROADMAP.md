@@ -43,31 +43,37 @@ and every label can be traced to KataGo evidence.
 Exit criterion: a user can upload a game and understand the three most
 important lessons without reading raw engine numbers.
 
-## Phase 3 — Import and game history
+## Phase 3A — Local import and game history (complete)
 
-1. [x] Add an “Import OGS game” field accepting a game URL or ID. Public games can
-   be fetched through OGS's SGF endpoint; private games should continue through
-   manual file upload unless the user explicitly connects an account.
-2. Keep drag-and-drop SGF as the universal import path for OGS, KGS, Fox,
-   Tygem, Pandanet, and desktop editors.
-   Implemented upload and size/read errors; server-specific encoding fixtures
-   remain to be verified.
-3. Add accounts only when persistence is valuable: saved games, review history,
-   player preferences, and usage limits.
-4. Store original SGF separately from derived analysis. Use object storage for
-   SGFs and a relational database for games, positions, jobs, and annotations.
-   Local foundation implemented: IndexedDB saved-review library preserves
-   original SGF, edited variations, settings, and analysis separately. Cloud
-   object storage, relational persistence, and accounts remain pending.
+1. [x] Import a public OGS game by URL or ID through a fixed-host backend route
+   with timeout, size limit, and private-game/rate-limit errors. Private games
+   can be imported through a manual SGF upload.
+2. [x] Upload or drag and drop an SGF file, with size and read errors, and
+   download an SGF copy of the game and its variations.
+3. [x] Save, reopen, find, rename, and delete reviews locally without an account.
+   Autosave edits and restore the selected move or variation after reopening.
+4. [x] Keep the original SGF separate from edited variations, settings, and
+   derived analysis in the browser's IndexedDB saved-review library.
 
-- [x] Save and reopen reviews locally without an account.
-- [x] Autosave saved reviews, find and rename or delete them, and restore the
-  selected move or variation after reopening.
-- [x] Proxy public OGS imports through a fixed-host backend route with timeout,
-  size limit, and private-game/rate-limit errors.
+Exit criterion met: users can revisit prior reviews and import a public OGS
+game from its URL in one step.
 
-Exit criterion: users can revisit prior reviews and import an OGS game from its
-URL in one step.
+## Phase 3B — Cloud sync and account-linked history (pending)
+
+1. [ ] Verify SGF imports against encoding fixtures from OGS, KGS, Fox, Tygem,
+   Pandanet, and desktop editors so manual upload remains a reliable fallback.
+2. [ ] Configure a real Supabase project and verify email-link sign-in end to
+   end. The frontend and backend auth integration exists, but live verification
+   is still part of Phase 5.4.
+3. [ ] Link saved games, review history, and player preferences to an account;
+   sync them across devices while preserving the existing local library.
+4. [ ] Store original SGFs in object storage and game, position, job, and
+   annotation records in a relational database suitable for deployment. The
+   current IndexedDB library and single-host SQLite job queue are local
+   foundations, not cloud persistence.
+
+Exit criterion: a signed-in user can reopen a saved review on another device,
+with its original SGF and derived analysis kept distinct.
 
 ## Phase 4 — Conversational coach
 
