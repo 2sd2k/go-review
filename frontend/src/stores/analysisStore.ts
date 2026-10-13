@@ -32,17 +32,30 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     set((state) => {
       const newResults = new Map(state.results);
 
-      // Classify the move quality
-      const prevAnalysis = newResults.get(analysis.move_number - 1);
-      if (analysis.move_number > 0) {
-        const { quality, winRateLoss, pointLoss, impactScore } = classifyMove(prevAnalysis, analysis);
-        analysis.quality = quality;
-        analysis.win_rate_loss = winRateLoss;
-        analysis.point_loss = pointLoss;
-        analysis.impact_score = impactScore;
-      }
+      const classify = (current: MoveAnalysis, previous: MoveAnalysis): MoveAnalysis => {
+        // Losses computed by an earlier frontend fallback must not be mistaken
+        // for a direct KataGo comparison when a replay replaces a position.
+        const source = current.played_move && current.best_move ? current : {
+          ...current, win_rate_loss: undefined, point_loss: undefined,
+        };
+        const { quality, winRateLoss, pointLoss, impactScore } = classifyMove(previous, source);
+        return {
+          ...current, quality, win_rate_loss: winRateLoss,
+          point_loss: pointLoss, impact_score: impactScore,
+        };
+      };
 
-      newResults.set(analysis.move_number, analysis);
+      const previous = newResults.get(analysis.move_number - 1);
+      newResults.set(analysis.move_number,
+        analysis.move_number > 0 && previous ? classify(analysis, previous) : { ...analysis });
+
+      // KataGo may finish the successor before this position. Classify it as
+      // soon as its missing predecessor arrives (or is replayed).
+      const successor = newResults.get(analysis.move_number + 1);
+      if (successor) {
+        newResults.set(analysis.move_number + 1,
+          classify(successor, newResults.get(analysis.move_number)!));
+      }
       return { results: newResults };
     });
   },

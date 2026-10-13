@@ -135,8 +135,12 @@ without claiming that KataGo itself speaks natural language.
   final (not intermediate) protocol responses and reject `noResults`.
 - [x] Send KataGo termination requests when a WebSocket client cancels.
 - [x] Consume and retain bounded KataGo stderr output for diagnostics.
-- Use engine-returned turn numbers and complete results in arrival order.
-- Avoid retaining ownership arrays for every move unless the UI needs them.
+- [x] Validate engine-returned turn numbers and complete positions as their
+  replies and played-move comparisons become ready, even when replies arrive
+  out of order. Reclassify the next move when its predecessor arrives later.
+- Keep per-position ownership arrays for now: the board's ownership overlay
+  supports navigation to any reviewed move. Revisit compact storage or lazy
+  retrieval if real review sizes make this a measured bottleneck.
 - [x] Run frontend lint/build, backend tests, and mocked subprocess protocol
   tests in CI. Keep the real-model smoke test optional because it is
   hardware-specific.

@@ -35,6 +35,7 @@ class KataGoResponseTests(unittest.TestCase):
     def test_preserves_black_perspective_when_white_is_to_move(self):
         result = parse_katago_response(
             {
+                "turnNumber": 1,
                 "rootInfo": {
                     "currentPlayer": "W",
                     "winrate": 0.7,
@@ -51,13 +52,20 @@ class KataGoResponseTests(unittest.TestCase):
                 ],
                 "ownership": [0.0] * 361,
             },
-            move_number=1,
+            expected_turn=1,
         )
 
+        self.assertEqual(result.move_number, 1)
         self.assertEqual(result.current_player, "W")
         self.assertEqual(result.win_rate, 0.7)
         self.assertEqual(result.score_lead, 3.5)
         self.assertEqual(result.top_moves[0].win_rate, 0.72)
+
+    def test_rejects_missing_or_wrong_engine_turn_number(self):
+        for response in ({}, {"turnNumber": 2}, {"turnNumber": True}):
+            with self.subTest(response=response):
+                with self.assertRaisesRegex(ValueError, "turnNumber"):
+                    parse_katago_response(response, expected_turn=1)
 
     def test_calculates_losses_from_each_players_perspective(self):
         black_best = SuggestedMove(

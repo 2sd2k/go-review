@@ -151,6 +151,18 @@ class AnalysisWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event["type"] for event in self.store.events_since(job_id, events[0]["id"])],
                          ["result", "complete"])
 
+    async def test_worker_persists_out_of_order_positions(self):
+        class OutOfOrderEngine:
+            async def analyze_game(self, **kwargs):
+                yield result(1)
+                yield result(0)
+
+        job_id = self.store.enqueue(request())
+        self.assertTrue(await process_one_job(self.store, "worker-a", OutOfOrderEngine()))
+        self.assertEqual(self.store.get_job(job_id)["state"], "complete")
+        events = self.store.events_since(job_id, 0)
+        self.assertEqual([event["move_number"] for event in events[:2]], [1, 0])
+
     async def test_error_is_persisted_and_does_not_look_complete(self):
         class FailingEngine:
             async def analyze_game(self, **kwargs):

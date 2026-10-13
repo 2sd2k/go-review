@@ -303,7 +303,8 @@ class KataGoEngine:
 
         # Send a query for each position (including the empty board)
         futures: list[tuple[int, asyncio.Future]] = []
-        comparisons: dict[int, tuple[SuggestedMove, SuggestedMove, float, float]] = {}
+        comparison_tasks: list[asyncio.Task] = []
+        position_tasks: list[asyncio.Task] = []
 
         game_id = uuid4().hex
         completed_all = False
@@ -330,43 +331,61 @@ class KataGoEngine:
 
             await asyncio.wait_for(self._process.stdin.drain(), self.query_timeout)
 
-            # Comparisons for a played move depend on its preceding position,
-            # so process turns in order even if KataGo answers out of order.
-            for turn, future in futures:
-                try:
-                    response = await future
-                    analysis = parse_katago_response(response, turn)
-                    comparison = comparisons.get(turn)
-                    if comparison:
-                        played_move, best_move, win_rate_loss, point_loss = comparison
-                        analysis.played_move = played_move
-                        analysis.best_move = best_move
-                        analysis.win_rate_loss = win_rate_loss
-                        analysis.point_loss = point_loss
-                    yield analysis
+            # A played move's comparison needs the preceding position's answer,
+            # not the preceding position's completed review. Keep that one
+            # dependency without blocking unrelated turns on earlier replies.
+            comparison_slots = asyncio.Semaphore(1)
 
-                    if turn < len(moves):
-                        comparison = await self._get_played_move_comparison(
-                            game_id=game_id,
-                            turn=turn,
-                            position_response=response,
-                            moves=moves,
-                            initial_stones=initial_stones or [],
-                            rules=rules,
-                            komi=komi,
-                            board_size=board_size,
-                            max_visits=visits,
-                        )
+            async def compare_next_move(turn: int, future: asyncio.Future):
+                response = await asyncio.shield(future)
+                async with comparison_slots:
+                    return await self._get_played_move_comparison(
+                        game_id=game_id,
+                        turn=turn,
+                        position_response=response,
+                        moves=moves,
+                        initial_stones=initial_stones or [],
+                        rules=rules,
+                        komi=komi,
+                        board_size=board_size,
+                        max_visits=visits,
+                    )
+
+            async def complete_position(turn: int, future: asyncio.Future):
+                try:
+                    response = await asyncio.shield(future)
+                    analysis = parse_katago_response(response, expected_turn=turn)
+                    if turn:
+                        comparison = await comparison_tasks[turn - 1]
                         if comparison:
-                            comparisons[turn + 1] = comparison
+                            played_move, best_move, win_rate_loss, point_loss = comparison
+                            analysis.played_move = played_move
+                            analysis.best_move = best_move
+                            analysis.win_rate_loss = win_rate_loss
+                            analysis.point_loss = point_loss
+                    return analysis
                 except Exception as error:
                     logger.error("Error analyzing turn %s: %s", turn, error)
                     raise
-                finally:
-                    self._drop_pending(f"{game_id}_t{turn}")
+
+            comparison_tasks = [
+                asyncio.create_task(compare_next_move(turn, future))
+                for turn, future in futures[:-1]
+            ]
+            position_tasks = [
+                asyncio.create_task(complete_position(turn, future))
+                for turn, future in futures
+            ]
+            for task in asyncio.as_completed(position_tasks):
+                yield await task
             completed_all = True
         finally:
             # Also run when a worker closes this generator after cancellation.
+            for task in position_tasks + comparison_tasks:
+                if not task.done():
+                    task.cancel()
+            if position_tasks or comparison_tasks:
+                await asyncio.gather(*position_tasks, *comparison_tasks, return_exceptions=True)
             if not completed_all:
                 await self._terminate_queries([
                     f"{game_id}_t{turn}" for turn, future in futures if not future.done()
@@ -471,8 +490,13 @@ def calculate_move_losses(
     return win_rate_loss, point_loss
 
 
-def parse_katago_response(response: dict, move_number: int) -> MoveAnalysis:
+def parse_katago_response(response: dict, expected_turn: int) -> MoveAnalysis:
     """Convert raw KataGo JSON response to our MoveAnalysis model."""
+    move_number = response.get("turnNumber")
+    if type(move_number) is not int or move_number != expected_turn:
+        raise ValueError(
+            f"KataGo returned turnNumber {move_number!r} for expected turn {expected_turn}"
+        )
     root_info = response.get("rootInfo", {})
     move_infos = response.get("moveInfos", [])
     ownership = response.get("ownership", [])
